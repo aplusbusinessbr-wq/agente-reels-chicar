@@ -1,0 +1,32 @@
+# Credenciais e tokens — NUNCA subir
+.env
+client_secrets.json
+token_youtube.pickle
+token_tiktok.json
+youtube_cookies.json
+*.pickle
+
+# Sessões de browser e Instagram
+sessao_youtube/
+session_instagram
+sessao_instagram
+
+# Vídeos baixados
+videos_baixados/
+*.mp4
+*.mkv
+*.webm
+
+# Logs grandes
+log_agente.txt
+log_agendador.txt
+log_dashboard.txt
+
+# Debug
+oauth_debug.png
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
