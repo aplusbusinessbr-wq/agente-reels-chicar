@@ -2,11 +2,11 @@
 .env
 client_secrets.json
 token_youtube.pickle
+*.pickle
 token_tiktok.json
 youtube_cookies.json
-*.pickle
 
-# Sessões de browser e Instagram
+# Sessões — armazenadas como secrets base64 no GitHub Actions
 sessao_youtube/
 session_instagram
 sessao_instagram

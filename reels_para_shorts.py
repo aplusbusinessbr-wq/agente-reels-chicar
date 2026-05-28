@@ -32,7 +32,7 @@ def _load_env():
                 _line = _line.strip()
                 if _line and not _line.startswith("#") and "=" in _line:
                     _k, _v = _line.split("=", 1)
-                    os.environ.setdefault(_k.strip(), _v.strip())
+                    os.environ[_k.strip()] = _v.strip()
 _load_env()
 
 IG_APP_ID = "936619743392459"
@@ -346,19 +346,18 @@ SCOPES          = ["https://www.googleapis.com/auth/youtube"]
 
 def _oauth_youtube_via_playwright():
     """Renova o token OAuth do YouTube automaticamente usando a sessão
-    Playwright já autenticada em sessao_youtube/ — sem interação do usuário."""
+    salva em sessao_youtube/ (Chromium headless, aplusbusinessbr@gmail.com).
+    Rode login_youtube.py uma vez para salvar a sessão."""
     import threading
     import http.server
     import urllib.parse
     from google_auth_oauthlib.flow import Flow
     from playwright.sync_api import sync_playwright
 
-    # Porta 0 = SO escolhe uma porta livre
-    server = http.server.HTTPServer(("localhost", 0), type("_H", (http.server.BaseHTTPRequestHandler,), {
-        "do_GET": lambda self: None, "log_message": lambda self, *a: None
-    }))
-    port = server.server_address[1]
-    server.server_close()
+    # Porta aleatória livre
+    _tmp = http.server.HTTPServer(("localhost", 0), http.server.BaseHTTPRequestHandler)
+    port = _tmp.server_address[1]
+    _tmp.server_close()
 
     redirect_uri = f"http://localhost:{port}"
     flow = Flow.from_client_secrets_file(CLIENT_SECRETS, scopes=SCOPES,
@@ -380,54 +379,107 @@ def _oauth_youtube_via_playwright():
             pass
 
     server = http.server.HTTPServer(("localhost", port), _Handler)
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    TARGET_EMAIL = "bruna.chicar@gmail.com"  # proprietária do canal Chicar
+
+    if not os.path.exists(SESSAO_YOUTUBE_DIR):
+        raise Exception(
+            "YouTube OAuth: sessao_youtube/ não encontrada. "
+            "Rode login_youtube.py para salvar a sessão."
+        )
 
     try:
         with sync_playwright() as p:
             ctx = p.chromium.launch_persistent_context(
                 user_data_dir=SESSAO_YOUTUBE_DIR,
-                channel="chrome",
                 headless=True,
                 args=["--disable-blink-features=AutomationControlled"],
                 ignore_default_args=["--enable-automation"],
             )
+            log("  YouTube OAuth: usando sessao_youtube/ (Chromium)...")
             page = ctx.new_page()
-            log("  YouTube OAuth: abrindo tela de consentimento via sessão salva...")
-            page.goto(auth_url, wait_until="networkidle", timeout=30000)
+            page.goto(auth_url, wait_until="networkidle", timeout=45000)
 
-            # Clicar em Permitir / Allow
-            clicou = False
-            for sel in [
-                'button:has-text("Permitir")',
-                'button:has-text("Allow")',
-                '#submit_approve_access',
-                'button[value="true"]',
-            ]:
-                try:
-                    loc = page.locator(sel)
-                    if loc.count() > 0:
-                        loc.first.click()
-                        clicou = True
-                        # Aguarda redirect para o servidor local de callback
+            # Passo 1: seletor de conta ("Escolha uma conta")
+            for _ in range(3):
+                content = page.content()
+                url = page.url
+                if "localhost" in url:
+                    break  # já redirecionou para callback
+
+                # Seletor de conta
+                if "accounts.google.com/o/oauth2/v2/auth" in url or "Escolha uma conta" in content or "Choose an account" in content:
+                    clicked = False
+                    for sel in [
+                        f'[data-email="{TARGET_EMAIL}"]',
+                        f'li:has-text("{TARGET_EMAIL}")',
+                        f'div[aria-label*="{TARGET_EMAIL}"]',
+                        f'//li[.//text()[contains(.,"{TARGET_EMAIL}")]]',
+                        f'//div[.//text()[contains(.,"{TARGET_EMAIL}")]][@role="link" or @role="button"]',
+                    ]:
                         try:
-                            page.wait_for_url(f"http://localhost:{port}/**", timeout=15000)
+                            if sel.startswith("//"):
+                                loc = page.locator(f"xpath={sel}")
+                            else:
+                                loc = page.locator(sel)
+                            if loc.count() > 0:
+                                loc.first.click()
+                                page.wait_for_load_state("networkidle", timeout=15000)
+                                clicked = True
+                                break
                         except Exception:
                             pass
-                        break
-                except Exception:
-                    pass
+                    if not clicked:
+                        # Último recurso: clicar no elemento que contém o email
+                        try:
+                            page.get_by_text(TARGET_EMAIL).first.click()
+                            page.wait_for_load_state("networkidle", timeout=15000)
+                        except Exception:
+                            pass
 
-            if not clicou:
-                # Salva screenshot para diagnóstico
+                # Passo 2: página de senha (conta desconectada)
+                if "signin" in page.url or "password" in page.url or "identifier" in page.url:
+                    page.screenshot(path="oauth_debug.png")
+                    ctx.close()
+                    raise Exception(
+                        f"YouTube OAuth: precisa fazer login com {TARGET_EMAIL}. "
+                        "Rode login_youtube.py com o Chrome fechado para salvar a sessão correta."
+                    )
+
+                # Passo 3: botão Permitir / Allow
+                clicou = False
+                for sel in [
+                    'button:has-text("Permitir")',
+                    'button:has-text("Allow")',
+                    '#submit_approve_access',
+                    'button[value="true"]',
+                ]:
+                    try:
+                        loc = page.locator(sel)
+                        if loc.count() > 0:
+                            loc.first.click()
+                            clicou = True
+                            try:
+                                page.wait_for_url(f"http://localhost:{port}/**", timeout=20000)
+                            except Exception:
+                                pass
+                            break
+                    except Exception:
+                        pass
+                if clicou:
+                    break
+                page.wait_for_timeout(2000)
+
+            else:
                 page.screenshot(path="oauth_debug.png")
                 ctx.close()
                 raise Exception(
-                    "YouTube OAuth: botão Permitir não encontrado. "
-                    "A sessão Playwright pode ter expirado — rode login_youtube.py uma vez."
+                    "YouTube OAuth: botão Permitir não encontrado após 3 tentativas. "
+                    "Veja oauth_debug.png para diagnóstico."
                 )
 
-            callback["done"].wait(timeout=15)
+            callback["done"].wait(timeout=20)
             ctx.close()
     finally:
         server.shutdown()
@@ -516,7 +568,25 @@ def upload_via_youtube_api(caminho_video: str, titulo: str, descricao: str,
 #  IA — TÍTULO
 # ─────────────────────────────────────────
 
-def gerar_titulo_com_ia(legenda: str) -> str:
+_FALLBACK_TITLES = [
+    "Mini veículo incrível — vem conferir na Chicar!",
+    "Quadriciclo seminovo esperando por você!",
+    "Esse é o veículo que você estava procurando!",
+    "Mini veículo disponível — não perca!",
+    "Venha conhecer nosso seminovo do dia!",
+    "Quadriciclo top de linha na Chicar BH!",
+    "Seminovo especial — venha testar!",
+    "Mini veículo perfeito para aventura!",
+    "Confira esse seminovo incrível!",
+    "Chicar Mini Veículos — novidade do dia!",
+    "Esse quadriciclo vai te conquistar!",
+    "Oportunidade imperdível na Chicar!",
+    "Mini veículo com preço justo em BH!",
+    "Venha dirigir esse seminovo hoje!",
+    "Não perca esse veículo especial!",
+]
+
+def gerar_titulo_com_ia(legenda: str, shortcode: str = "") -> str:
     try:
         cliente = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         prompt = f"""Você é especialista em copywriting para YouTube Shorts de uma loja de mini veículos e quadriciclos chamada Chicar Mini Veículos, em BH.
@@ -541,8 +611,9 @@ Responda APENAS com o título."""
         )
         return resp.content[0].text.strip().strip('"').strip("'")[:100]
     except Exception as e:
-        log(f"  Aviso: IA indisponível ({e}). Usando título padrão.")
-        return "Esse veículo vai te surpreender — vem ver!"
+        import random
+        log(f"  Aviso: IA indisponível ({e}). Usando título alternativo.")
+        return random.choice(_FALLBACK_TITLES)
 
 def gerar_descricao() -> str:
     return (
@@ -582,9 +653,11 @@ def login_instagram():
         filename_pattern="{shortcode}", dirname_pattern=PASTA_DOWNLOAD
     )
     sessao_valida = False
+    sessao_carregada = False
     try:
         L.load_session_from_file(INSTAGRAM_LOGIN, ARQUIVO_SESSAO_IG)
-        # Valida com o endpoint de feed — mesmo que será usado na execução real
+        sessao_carregada = True
+        # Valida com o endpoint de feed
         r = L.context._session.get(
             "https://i.instagram.com/api/v1/feed/user/33469782306/",
             params={"count": 1},
@@ -594,20 +667,37 @@ def login_instagram():
             sessao_valida = True
             log("Sessão Instagram carregada e validada.")
         else:
-            log(f"Sessão Instagram expirada (status {r.status_code}). Fazendo novo login...")
+            log(f"Sessão Instagram expirada (status {r.status_code}). Tentando re-login...")
     except Exception:
-        log("Sessão Instagram não encontrada ou inválida. Fazendo novo login...")
+        log("Sessão Instagram não encontrada. Tentando login...")
 
     if not sessao_valida:
-        try:
-            L.login(INSTAGRAM_LOGIN, INSTAGRAM_SENHA)
-        except SystemExit:
-            raise Exception(
-                "Instagram bloqueou o login (checkpoint / 2FA). "
-                "Execute login_instagram.py manualmente e tente novamente."
-            )
-        L.save_session_to_file(ARQUIVO_SESSAO_IG)
-        log("Login Instagram realizado e sessão salva.")
+        ultimo_erro = None
+        for tentativa in range(1, 4):  # 3 tentativas
+            try:
+                L.login(INSTAGRAM_LOGIN, INSTAGRAM_SENHA)
+                L.save_session_to_file(ARQUIVO_SESSAO_IG)
+                log("Login Instagram realizado e sessão salva.")
+                ultimo_erro = None
+                sessao_valida = True
+                break
+            except SystemExit:
+                raise Exception(
+                    "Instagram bloqueou o login (checkpoint / 2FA). "
+                    "Execute login_instagram.py manualmente e tente novamente."
+                )
+            except Exception as e:
+                ultimo_erro = e
+                espera = tentativa * 30
+                log(f"  Login Instagram falhou (tentativa {tentativa}/3): {e}. Aguardando {espera}s...")
+                time.sleep(espera)
+
+        if not sessao_valida:
+            if sessao_carregada:
+                # Sessão carregada mas re-login falhou — tenta usar a sessão existente mesmo assim
+                log(f"  Re-login falhou ({ultimo_erro}). Tentando continuar com sessão existente...")
+            else:
+                raise Exception(f"Login Instagram: {ultimo_erro}")
 
     # Usa a sessão interna do instaloader (já tem todos os cookies corretos)
     session = L.context._session

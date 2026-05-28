@@ -1,0 +1,67 @@
+name: Agente Reels Chicar
+
+on:
+  schedule:
+    - cron: '59 14 * * *'   # 11:59 BRT (UTC-3) todos os dias
+  workflow_dispatch:          # trigger manual pelo GitHub
+
+permissions:
+  contents: write             # necessário para git push do estado
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            instaloader \
+            anthropic \
+            yt-dlp \
+            google-api-python-client \
+            google-auth \
+            google-auth-httplib2 \
+            google-auth-oauthlib \
+            requests
+
+      - name: Write client_secrets.json
+        run: echo '${{ secrets.CLIENT_SECRETS_JSON }}' > client_secrets.json
+
+      - name: Decode YouTube token
+        run: echo '${{ secrets.YOUTUBE_TOKEN_PICKLE_B64 }}' | base64 -d > token_youtube.pickle
+
+      - name: Decode Instagram session
+        run: echo '${{ secrets.INSTAGRAM_SESSION_B64 }}' | base64 -d > sessao_instagram
+
+      - name: Configure git identity
+        run: |
+          git config user.email "agente@chicar.auto"
+          git config user.name "AgenteReels"
+
+      - name: Run agent
+        env:
+          INSTAGRAM_LOGIN:      ${{ secrets.INSTAGRAM_LOGIN }}
+          INSTAGRAM_SENHA:      ${{ secrets.INSTAGRAM_SENHA }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+          PUBLER_API_KEY:       ${{ secrets.PUBLER_API_KEY }}
+          PUBLER_WORKSPACE_ID:  ${{ secrets.PUBLER_WORKSPACE_ID }}
+          PUBLER_TIKTOK_ID:     ${{ secrets.PUBLER_TIKTOK_ID }}
+          TIKTOK_CLIENT_KEY:    ${{ secrets.TIKTOK_CLIENT_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+        run: python reels_para_shorts.py
