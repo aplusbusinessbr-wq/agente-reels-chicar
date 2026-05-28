@@ -788,6 +788,57 @@ def buscar_perfil_e_reels(session, ja_conhecidos):
 
     return user_id, novos
 
+def buscar_reels_novos_ytdlp(ja_conhecidos):
+    """Lista novos reels via yt-dlp (scraping público).
+    Funciona de qualquer IP, inclusive GitHub Actions — não precisa de sessão."""
+    DATA_MINIMA = datetime.datetime(2026, 4, 26)
+
+    url = f"https://www.instagram.com/{INSTAGRAM_PERFIL}/reels/"
+    ydl_opts = {
+        "extract_flat": "in_playlist",
+        "quiet": True,
+        "no_warnings": True,
+        "playlistend": 25,  # verifica os últimos 25 reels
+    }
+
+    novos = []
+    user_id = "desconhecido"
+
+    for tentativa in range(1, 4):
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            user_id = (info.get("channel_id") or info.get("uploader_id", "desconhecido"))
+            entries = info.get("entries") or []
+
+            for entry in entries:
+                shortcode = entry.get("id") or ""
+                if not shortcode or shortcode in ja_conhecidos:
+                    continue
+                timestamp = entry.get("timestamp") or 0
+                if timestamp:
+                    taken_at = datetime.datetime.fromtimestamp(timestamp)
+                    if taken_at < DATA_MINIMA:
+                        continue
+                legenda = entry.get("description") or entry.get("title") or ""
+                novos.append({
+                    "shortcode": shortcode,
+                    "video_url": entry.get("url") or f"https://www.instagram.com/reel/{shortcode}/",
+                    "legenda":   legenda,
+                    "taken_at":  timestamp,
+                })
+            break  # sucesso
+        except Exception as e:
+            if tentativa < 3:
+                espera = 30 * tentativa
+                log(f"  yt-dlp listing falhou (tentativa {tentativa}/3): {e}. Aguardando {espera}s...")
+                time.sleep(espera)
+            else:
+                raise Exception(f"Falha ao listar reels após 3 tentativas: {e}")
+
+    return user_id, novos
+
+
 def baixar_video_instagram(shortcode, tentativas=3):
     """Baixa reel do Instagram via yt-dlp com retry automático em caso de rate-limit."""
     caminho = os.path.join(PASTA_DOWNLOAD, f"{shortcode}.mp4")
@@ -799,8 +850,7 @@ def baixar_video_instagram(shortcode, tentativas=3):
         "format": "best[ext=mp4]/best",
         "quiet": True,
         "no_warnings": True,
-        "username": INSTAGRAM_LOGIN,
-        "password": INSTAGRAM_SENHA,
+        # Sem credenciais: conta pública, yt-dlp acessa via scraping sem auth
     }
     ultimo_erro = None
     for tentativa in range(1, tentativas + 1):
@@ -847,14 +897,14 @@ def main():
         log("AVISO: token_youtube.pickle não encontrado — será necessário autorizar via browser.")
     log("Credenciais YouTube verificadas.")
 
-    # ── LOGIN INSTAGRAM ───────────────────────────────────
+    # ── LOGIN INSTAGRAM (opcional — fallback para sessão ou acesso público) ───
     log("Conectando ao Instagram...")
     try:
         ig_loader, ig_session = login_instagram()
         log("Instagram OK.")
     except Exception as e:
-        log(f"ERRO no login do Instagram: {e}")
-        return
+        ig_loader, ig_session = None, None
+        log(f"  Instagram: sessão indisponível ({e}). Usando acesso público via yt-dlp.")
 
     # ── FILA LEGADA: migra itens antigos de fila_reels.json ──────────────────
     fila_legada = carregar_fila()
@@ -863,8 +913,14 @@ def main():
     # ── BUSCA REELS NOVOS NO INSTAGRAM ───────────────────────────────────────
     log("Verificando novos Reels no Instagram...")
     try:
-        user_id, novos_instagram = buscar_perfil_e_reels(ig_session, ja_conhecidos)
-        log(f"Perfil encontrado. ID: {user_id}")
+        if ig_session is not None:
+            # Método preferido: API privada via sessão instaloader (mais rápido, tem legenda completa)
+            user_id, novos_instagram = buscar_perfil_e_reels(ig_session, ja_conhecidos)
+            log(f"Perfil encontrado. ID: {user_id}")
+        else:
+            # Fallback: yt-dlp via scraping público (funciona de qualquer IP, inclusive GitHub Actions)
+            user_id, novos_instagram = buscar_reels_novos_ytdlp(ja_conhecidos)
+            log(f"Perfil encontrado via yt-dlp. {len(novos_instagram)} reel(s) novos.")
     except Exception as e:
         log(f"ERRO ao buscar reels: {e}")
         return
