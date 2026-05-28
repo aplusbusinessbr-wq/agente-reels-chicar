@@ -912,18 +912,26 @@ def main():
 
     # ── BUSCA REELS NOVOS NO INSTAGRAM ───────────────────────────────────────
     log("Verificando novos Reels no Instagram...")
-    try:
-        if ig_session is not None:
-            # Método preferido: API privada via sessão instaloader (mais rápido, tem legenda completa)
+    novos_instagram = []
+    user_id = "desconhecido"
+
+    # Método 1: API privada via sessão instaloader (preferido — legenda completa)
+    if ig_session is not None:
+        try:
             user_id, novos_instagram = buscar_perfil_e_reels(ig_session, ja_conhecidos)
             log(f"Perfil encontrado. ID: {user_id}")
-        else:
-            # Fallback: yt-dlp via scraping público (funciona de qualquer IP, inclusive GitHub Actions)
+        except Exception as e:
+            log(f"  API Instagram falhou ({e}). Tentando via yt-dlp...")
+            ig_session = None  # força fallback abaixo
+
+    # Método 2: scraping público via yt-dlp (GitHub Actions, IP bloqueado, ou fallback)
+    if ig_session is None:
+        try:
             user_id, novos_instagram = buscar_reels_novos_ytdlp(ja_conhecidos)
-            log(f"Perfil encontrado via yt-dlp. {len(novos_instagram)} reel(s) novos.")
-    except Exception as e:
-        log(f"ERRO ao buscar reels: {e}")
-        return
+            log(f"  yt-dlp: {len(novos_instagram)} reel(s) novos encontrados.")
+        except Exception as e:
+            log(f"ERRO ao buscar reels: {e}")
+            return
 
     # Fila legada vem primeiro, novos do Instagram em seguida
     todos = fila_legada + novos_instagram
