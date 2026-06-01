@@ -789,17 +789,24 @@ def buscar_perfil_e_reels(session, ja_conhecidos):
     return user_id, novos
 
 def buscar_reels_novos_ytdlp(ja_conhecidos):
-    """Lista novos reels via yt-dlp (scraping público).
-    Funciona de qualquer IP, inclusive GitHub Actions — não precisa de sessão."""
+    """Lista novos reels via yt-dlp.
+    Usa instagram_cookies.txt se disponível (necessário no GitHub Actions),
+    caso contrário tenta acesso público."""
     DATA_MINIMA = datetime.datetime(2026, 4, 26)
 
     url = f"https://www.instagram.com/{INSTAGRAM_PERFIL}/reels/"
+    _base = os.path.dirname(os.path.abspath(__file__))
+    cookies_file = os.path.join(_base, "instagram_cookies.txt")
+
     ydl_opts = {
         "extract_flat": "in_playlist",
         "quiet": True,
         "no_warnings": True,
         "playlistend": 25,  # verifica os últimos 25 reels
     }
+    if os.path.exists(cookies_file):
+        ydl_opts["cookiefile"] = cookies_file
+        log("  yt-dlp: usando instagram_cookies.txt")
 
     novos = []
     user_id = "desconhecido"

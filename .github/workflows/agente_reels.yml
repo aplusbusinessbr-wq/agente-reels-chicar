@@ -51,6 +51,15 @@ jobs:
       - name: Decode Instagram session
         run: echo '${{ secrets.INSTAGRAM_SESSION_B64 }}' | base64 -d > sessao_instagram
 
+      - name: Decode Instagram cookies
+        run: |
+          if [ -n "${{ secrets.INSTAGRAM_COOKIES_B64 }}" ]; then
+            echo '${{ secrets.INSTAGRAM_COOKIES_B64 }}' | base64 -d > instagram_cookies.txt
+            echo "instagram_cookies.txt decodificado."
+          else
+            echo "Secret INSTAGRAM_COOKIES_B64 não configurado — yt-dlp usará acesso público."
+          fi
+
       - name: Configure git identity
         run: |
           git config user.email "agente@chicar.auto"
