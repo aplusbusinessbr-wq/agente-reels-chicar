@@ -35,7 +35,7 @@ jobs:
           pip install \
             instaloader \
             anthropic \
-            yt-dlp \
+            "yt-dlp>=2026.5.25" \
             google-api-python-client \
             google-auth \
             google-auth-httplib2 \

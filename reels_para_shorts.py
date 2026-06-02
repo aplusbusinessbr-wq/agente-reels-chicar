@@ -794,7 +794,8 @@ def buscar_reels_novos_ytdlp(ja_conhecidos):
     caso contrário tenta acesso público."""
     DATA_MINIMA = datetime.datetime(2026, 4, 26)
 
-    url = f"https://www.instagram.com/{INSTAGRAM_PERFIL}/reels/"
+    # yt-dlp suporta o perfil principal — /reels/ não tem extractor
+    url = f"https://www.instagram.com/{INSTAGRAM_PERFIL}/"
     _base = os.path.dirname(os.path.abspath(__file__))
     cookies_file = os.path.join(_base, "instagram_cookies.txt")
 
@@ -802,7 +803,7 @@ def buscar_reels_novos_ytdlp(ja_conhecidos):
         "extract_flat": "in_playlist",
         "quiet": True,
         "no_warnings": True,
-        "playlistend": 25,  # verifica os últimos 25 reels
+        "playlistend": 25,  # verifica os últimos 25 posts/reels
     }
     if os.path.exists(cookies_file):
         ydl_opts["cookiefile"] = cookies_file
