@@ -630,5 +630,33 @@
     "horario_agendado": "15:00",
     "youtube_id": "11rTES3GXqc",
     "tiktok_id": "6a209eb8d16fa6fe17919b9c"
+  },
+  {
+    "shortcode": "DZNAGLnx1zE",
+    "data": "2026-06-07",
+    "horario_agendado": "18:00",
+    "youtube_id": "COGxVjGao2Y",
+    "tiktok_id": "6a22e5255a64ae2b9187d521"
+  },
+  {
+    "shortcode": "DZL6_zlx-Ur",
+    "data": "2026-06-08",
+    "horario_agendado": "12:00",
+    "youtube_id": "7yvjN5LO9Ao",
+    "tiktok_id": "6a22e537d366a11175bcca29"
+  },
+  {
+    "shortcode": "DZLbaBUxKtQ",
+    "data": "2026-06-08",
+    "horario_agendado": "15:00",
+    "youtube_id": "pMu1WwIRd50",
+    "tiktok_id": "6a22e54cd366a11175bcca65"
+  },
+  {
+    "shortcode": "DZLRw9CR7Ly",
+    "data": "2026-06-08",
+    "horario_agendado": "18:00",
+    "youtube_id": "PtyU1eiddmA",
+    "tiktok_id": "6a22e561c7e1267a8652b484"
   }
 ]
