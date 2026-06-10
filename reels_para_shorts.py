@@ -565,41 +565,86 @@ def upload_via_youtube_api(caminho_video: str, titulo: str, descricao: str,
 
 
 # ─────────────────────────────────────────
-#  IA — TÍTULO
+#  IA — TÍTULO E DESCRIÇÃO (otimizados para busca / Google AI)
 # ─────────────────────────────────────────
 
-_FALLBACK_TITLES = [
-    "Mini veículo incrível — vem conferir na Chicar!",
-    "Quadriciclo seminovo esperando por você!",
-    "Esse é o veículo que você estava procurando!",
-    "Mini veículo disponível — não perca!",
-    "Venha conhecer nosso seminovo do dia!",
-    "Quadriciclo top de linha na Chicar BH!",
-    "Seminovo especial — venha testar!",
-    "Mini veículo perfeito para aventura!",
-    "Confira esse seminovo incrível!",
-    "Chicar Mini Veículos — novidade do dia!",
-    "Esse quadriciclo vai te conquistar!",
-    "Oportunidade imperdível na Chicar!",
-    "Mini veículo com preço justo em BH!",
-    "Venha dirigir esse seminovo hoje!",
-    "Não perca esse veículo especial!",
+SITE_BASE = "https://www.chicarminiveiculos.com"
+
+# Modelos do catálogo do site — usado para detectar o modelo na legenda
+# e linkar a página específica na descrição (palavras-chave em minúsculas).
+MODELOS_CATALOGO = {
+    "wolf 700":      ("Wolf 700 Mud",    f"{SITE_BASE}/catalogo/quadriciclos/wolf-700-mud"),
+    "wolf 1000":     ("Wolf 1000",       f"{SITE_BASE}/catalogo/quadriciclos/wolf-1000"),
+    "wolf 550":      ("Wolf 550",        f"{SITE_BASE}/catalogo/quadriciclos/wolf-550"),
+    "farmer":        ("Farmer 300",      f"{SITE_BASE}/catalogo/quadriciclos/farmer-300"),
+    "dakar":         ("Dakar 300",       f"{SITE_BASE}/catalogo/quadriciclos/dakar-300"),
+    "fox":           ("Fox 325",         f"{SITE_BASE}/catalogo/quadriciclos/fox-325"),
+    "bronco":        ("Bronco 200",      f"{SITE_BASE}/catalogo/buggys/bronco-200"),
+    "macan":         ("Macan 200",       f"{SITE_BASE}/catalogo/buggys/macan-200"),
+    "shark":         ("Shark 1200",      f"{SITE_BASE}/catalogo/buggys/shark-1200"),
+    "pro racing 110": ("Pro Racing 110", f"{SITE_BASE}/catalogo/mini-motos/pro-racing-110"),
+    "pro racing 125": ("Pro Racing 125", f"{SITE_BASE}/catalogo/mini-motos/pro-racing-125"),
+}
+
+# Artigos reais do blog para linkar na descrição (rotaciona)
+BLOG_LINKS = [
+    ("Guia: manutenção de quadriciclo", f"{SITE_BASE}/blog/manutencao-quadriciclo"),
+    ("Guia: pneus de quadriciclo",      f"{SITE_BASE}/blog/pneus-quadriciclo"),
+    ("Problemas comuns em quadriciclos", f"{SITE_BASE}/blog/problemas-quadriciclo"),
 ]
 
+
+def detectar_modelo(texto: str):
+    """Retorna (nome, url) do modelo citado no texto, ou None."""
+    t = (texto or "").lower()
+    # chaves mais longas primeiro para "wolf 700" ganhar de "wolf"
+    for chave in sorted(MODELOS_CATALOGO, key=len, reverse=True):
+        if chave in t:
+            return MODELOS_CATALOGO[chave]
+    return None
+
+
+_FALLBACK_TITLES = [
+    "Quanto custa um quadriciclo em BH? Veja na Chicar",
+    "Qual o melhor mini veículo para começar? Conheça este",
+    "Vale a pena comprar quadriciclo seminovo? Veja este modelo",
+    "Onde comprar quadriciclo em Belo Horizonte? Chicar Mini Veículos",
+    "Qual quadriciclo escolher para trilha? Esse é destaque",
+    "Quanto custa um buggy? Confira este na Chicar BH",
+    "Quadriciclo seminovo vale a pena? Veja o estado deste",
+    "Qual mini veículo comprar para o sítio? Veja esta opção",
+    "Onde encontrar quadriciclo com procedência em BH?",
+    "Quadriciclo para iniciante: qual escolher? Veja este",
+    "Quanto custa manter um quadriciclo? Conheça este modelo",
+    "Buggy ou quadriciclo: qual escolher? Veja este em detalhes",
+    "Qual o quadriciclo mais procurado em BH? Veja na Chicar",
+    "Mini veículo para família: qual a melhor opção?",
+    "Quadriciclo automático existe? Veja este na Chicar BH",
+]
+
+
 def gerar_titulo_com_ia(legenda: str, shortcode: str = "") -> str:
+    modelo = detectar_modelo(legenda)
+    modelo_info = f'O vídeo é sobre o modelo "{modelo[0]}".' if modelo else ""
     try:
         cliente = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        prompt = f"""Você é especialista em copywriting para YouTube Shorts de uma loja de mini veículos e quadriciclos chamada Chicar Mini Veículos, em BH.
+        prompt = f"""Você é especialista em SEO para YouTube Shorts de uma loja de mini veículos e quadriciclos chamada Chicar Mini Veículos, em BH.
 
 Crie UM título para YouTube Shorts com base na legenda abaixo.
 
+O título deve ser A PERGUNTA QUE AS PESSOAS PESQUISAM NO GOOGLE sobre esse veículo — o Google AI cita vídeos cujo título bate com a busca.
+
+Exemplos do formato desejado:
+- "Quanto custa o quadriciclo Wolf 700? Vale a pena em 2026?"
+- "Qual o melhor buggy para trilha? Veja o Shark 1200"
+- "Quadriciclo Farmer 300 é bom? Análise rápida"
+
 Regras:
-- Máximo 80 caracteres
-- Sem números (sem datas, preços, anos, contadores)
-- Desperte curiosidade ou desejo imediato de clicar
-- Linguagem natural e empolgante para quem quer comprar mini veículo
-- No máximo 1 emoji, só se fizer sentido
-- Sem aspas
+- Máximo 90 caracteres
+- Formato de pergunta de busca real (quanto custa, vale a pena, qual o melhor, é bom, onde comprar)
+- {modelo_info or "Se a legenda citar o modelo do veículo, use o nome exato no título."}
+- Pode usar o nome/número do modelo (ex.: Wolf 700), mas NUNCA invente preço em reais
+- Sem emoji, sem aspas
 
 Legenda: {legenda[:500] if legenda else "Mini veículo seminovo disponível na Chicar"}
 
@@ -615,11 +660,30 @@ Responda APENAS com o título."""
         log(f"  Aviso: IA indisponível ({e}). Usando título alternativo.")
         return random.choice(_FALLBACK_TITLES)
 
-def gerar_descricao() -> str:
+
+def gerar_descricao(legenda: str = "", shortcode: str = "") -> str:
+    """Descrição com link da página do modelo (quando detectado) + artigo do blog.
+    Links específicos > link da home: o Google AI usa esses links como fonte."""
+    modelo = detectar_modelo(legenda)
+
+    if modelo:
+        nome, url = modelo
+        linha_modelo = f"{nome} disponível na Chicar Mini Veículos em BH.\n"
+        linha_link = f"Preço atualizado e ficha técnica completa:\n👉 {url}\n\n"
+    else:
+        linha_modelo = "Mini veículos e quadriciclos novos e seminovos na Chicar, em BH.\n"
+        linha_link = f"Catálogo completo com preços e fichas técnicas:\n👉 {SITE_BASE}/catalogo\n\n"
+
+    # Rotaciona o artigo do blog de forma determinística por vídeo
+    blog_titulo, blog_url = BLOG_LINKS[sum(ord(c) for c in (shortcode or "x")) % len(BLOG_LINKS)]
+
     return (
-        f"Vídeo publicado originalmente no Instagram @{INSTAGRAM_PERFIL}.\n\n"
-        f"📲 Nos siga no Instagram: https://instagram.com/{INSTAGRAM_PERFIL}\n\n"
-        f"#chicarminiveiculos #miniveiculo #quadriciclo #seminovos #shorts"
+        linha_modelo
+        + linha_link
+        + f"{blog_titulo}:\n👉 {blog_url}\n\n"
+        + f"📲 Instagram: https://instagram.com/{INSTAGRAM_PERFIL}\n"
+        + f"💬 WhatsApp: https://api.whatsapp.com/send?phone=5531993875483\n\n"
+        + "#chicarminiveiculos #miniveiculo #quadriciclo #seminovos #shorts"
     )
 
 def calcular_horarios(n: int, offset: int = 0):
@@ -951,7 +1015,6 @@ def main():
 
     log(f"{len(todos)} Reel(s) para processar "
         f"({len(fila_legada)} da fila legada + {len(novos_instagram)} novos).")
-    descricao = gerar_descricao()
 
     # ── DOWNLOAD + UPLOAD IMEDIATO ────────────────────────────────────────────
     for reel in todos:
@@ -964,8 +1027,12 @@ def main():
             caminho = baixar_video_instagram(shortcode)
             time.sleep(2)
 
-            titulo = gerar_titulo_com_ia(legenda)
+            titulo    = gerar_titulo_com_ia(legenda)
+            descricao = gerar_descricao(legenda, shortcode)
             log(f"  Título: {titulo}")
+            modelo = detectar_modelo(legenda)
+            if modelo:
+                log(f"  Modelo detectado: {modelo[0]} → link específico na descrição")
 
             log(f"  Upload YouTube → {slot.strftime('%d/%m/%Y %H:%M')}...")
             video_id = upload_via_youtube_api(caminho, titulo, descricao, horario=slot)
