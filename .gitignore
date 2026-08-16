@@ -4,7 +4,9 @@ client_secrets.json
 token_youtube.pickle
 *.pickle
 token_tiktok.json
+token_instagram.json
 youtube_cookies.json
+instagram_cookies.txt
 
 # Sessões — armazenadas como secrets base64 no GitHub Actions
 sessao_youtube/
@@ -30,3 +32,15 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+
+# Binario ffmpeg copiado para o yt-dlp mesclar audio
+_ffmpeg/
+
+# NUNCA subir — dumps de token e material interno do produto
+tmp_pickle*.txt
+_produto/
+reels_postados.backup-*.json
+
+# Operação Resenha Geral (separada, não roda na nuvem)
+resenha_geral_postados.json
+log_resenha_geral.txt

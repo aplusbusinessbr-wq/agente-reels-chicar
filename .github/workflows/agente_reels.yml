@@ -2,16 +2,25 @@ name: Agente Reels Chicar
 
 on:
   schedule:
-    - cron: '59 14 * * *'   # 11:59 BRT (UTC-3) todos os dias
+    # 9h, 11h, 13h, 15h, 17h, 19h BRT (UTC-3) = 12,14,16,18,20,22 UTC
+    - cron: '0 12,14,16,18,20,22 * * *'
+    # 21h BRT = 0 UTC do dia seguinte
+    - cron: '0 0 * * *'
   workflow_dispatch:          # trigger manual pelo GitHub
 
 permissions:
   contents: write             # necessário para git push do estado
 
+concurrency:
+  group: agente-reels         # nunca rodar dois ao mesmo tempo
+  cancel-in-progress: false
+
 jobs:
   run-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      TZ: America/Sao_Paulo   # datetime.now() do agente em horário de Brasília
 
     steps:
       - name: Checkout
@@ -36,6 +45,7 @@ jobs:
             instaloader \
             anthropic \
             "yt-dlp>=2026.5.25" \
+            imageio-ffmpeg \
             google-api-python-client \
             google-auth \
             google-auth-httplib2 \
@@ -45,19 +55,16 @@ jobs:
       - name: Write client_secrets.json
         run: echo '${{ secrets.CLIENT_SECRETS_JSON }}' > client_secrets.json
 
+      - name: Write Instagram Graph API token
+        run: echo '${{ secrets.INSTAGRAM_TOKEN_JSON }}' > token_instagram.json
+
       - name: Decode YouTube token
         run: echo '${{ secrets.YOUTUBE_TOKEN_PICKLE_B64 }}' | base64 -d > token_youtube.pickle
 
-      - name: Decode Instagram session
-        run: echo '${{ secrets.INSTAGRAM_SESSION_B64 }}' | base64 -d > sessao_instagram
-
-      - name: Decode Instagram cookies
+      - name: Decode Instagram session (fallback legado)
         run: |
-          if [ -n "${{ secrets.INSTAGRAM_COOKIES_B64 }}" ]; then
-            echo '${{ secrets.INSTAGRAM_COOKIES_B64 }}' | base64 -d > instagram_cookies.txt
-            echo "instagram_cookies.txt decodificado."
-          else
-            echo "Secret INSTAGRAM_COOKIES_B64 não configurado — yt-dlp usará acesso público."
+          if [ -n "${{ secrets.INSTAGRAM_SESSION_B64 }}" ]; then
+            echo '${{ secrets.INSTAGRAM_SESSION_B64 }}' | base64 -d > sessao_instagram
           fi
 
       - name: Configure git identity

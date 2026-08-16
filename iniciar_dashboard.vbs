@@ -1,2 +1,4 @@
 Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "cmd /c """ & "D:\Downloads\AgenteReels\agente_reels_shorts\reels_to_shorts\abrir_dashboard.bat" & """", 0, False
+Set fso = CreateObject("Scripting.FileSystemObject")
+scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
+WshShell.Run "cmd /c """ & scriptDir & "\abrir_dashboard.bat""", 0, False

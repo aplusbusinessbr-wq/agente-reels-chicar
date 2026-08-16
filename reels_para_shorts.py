@@ -2,11 +2,12 @@
 =============================================================
   AGENTE: Reels → YouTube Shorts
   Cliente: @chicarminiveiculos
-  Horário: 11:59 AM diário — posts distribuídos entre 12h e 21h
+  Dinâmica: roda a cada 2h (9h–21h) e posta no MESMO DIA o que apareceu — just-in-time
 =============================================================
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -37,6 +38,10 @@ _load_env()
 
 IG_APP_ID = "936619743392459"
 
+# Instagram Graph API oficial (token permanente de System User — sem cookies/login)
+GRAPH_API_VER       = "v21.0"
+ARQUIVO_TOKEN_IG    = "token_instagram.json"
+
 # ─────────────────────────────────────────
 #  CONFIGURAÇÕES
 # ─────────────────────────────────────────
@@ -48,9 +53,18 @@ YOUTUBE_CHANNEL_ID = "UCG8BJRvVzQ0-FvEiBg6UQ2Q"
 PASTA_DOWNLOAD     = "videos_baixados"
 ARQUIVO_HISTORICO  = "reels_postados.json"
 ARQUIVO_FILA       = "fila_reels.json"
-HORA_INICIO        = 12
-HORA_FIM           = 21
-MAX_POR_DIA        = 3
+HORA_INICIO        = 12   # legado (agendador antigo de slots fixos)
+HORA_FIM           = 21   # legado
+MAX_POR_DIA        = 3    # legado
+
+# Dinâmica "just-in-time": espelha a conta — posta no mesmo dia o que apareceu,
+# sem teto diário e sem rolar para os próximos dias. O agente roda a cada 2h.
+JANELA_INICIO      = 9    # hora — não posta antes disso
+JANELA_FIM         = 21   # hora — não posta a partir disso (vai pra manhã seguinte)
+JIT_BUFFER_MIN     = 10   # margem após detectar o reel
+JIT_ESPACO_MIN     = 15   # espaçamento entre reels da mesma rodada
+FOTOS_MAX_DIA      = 6    # teto de posts de foto por dia no TikTok (backfill espalha)
+FOTOS_HORAS        = [9, 11, 13, 15, 17, 19]  # slots fixos dos posts de foto
 SESSAO_YOUTUBE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessao_youtube")
 
 
@@ -111,6 +125,52 @@ def proxima_data_disponivel(fila, historico, a_partir_de=None):
             return data
         data += datetime.timedelta(days=1)
 
+def _clamp_janela(dt):
+    """Mantém dt dentro da janela [JANELA_INICIO, JANELA_FIM).
+    Antes da abertura → mesmo dia às JANELA_INICIO. A partir do fechamento → dia seguinte às JANELA_INICIO."""
+    ini = datetime.time(JANELA_INICIO, 0)
+    fim = datetime.time(JANELA_FIM, 0)
+    if dt.time() < ini:
+        return dt.replace(hour=JANELA_INICIO, minute=0, second=0, microsecond=0)
+    if dt.time() >= fim:
+        prox = dt + datetime.timedelta(days=1)
+        return prox.replace(hour=JANELA_INICIO, minute=0, second=0, microsecond=0)
+    return dt
+
+
+def proximo_slot_jit(slot_anterior=None):
+    """Agendador just-in-time: posta no mesmo dia, logo após a detecção, respeitando
+    a janela de horário. Sem teto diário e sem rolar dias à frente — a cadência da
+    conta se espelha naturalmente porque o agente roda várias vezes ao dia.
+    1º reel da rodada: chame sem argumento. Demais: passe o slot anterior (espaça JIT_ESPACO_MIN)."""
+    if slot_anterior is None:
+        base = datetime.datetime.now() + datetime.timedelta(minutes=JIT_BUFFER_MIN)
+    else:
+        base = slot_anterior + datetime.timedelta(minutes=JIT_ESPACO_MIN)
+    return _clamp_janela(base)
+
+
+def proximo_slot_foto(historico):
+    """Slot para posts de FOTO no TikTok: máx FOTOS_MAX_DIA/dia nos horários fixos
+    FOTOS_HORAS. Ocupa o primeiro horário futuro livre do dia; cheio ou sem horário
+    futuro → transborda para o dia seguinte. Backfill grande se espalha sozinho."""
+    agora = datetime.datetime.now()
+    ocupados = {(i["data"], i.get("horario_agendado", ""))
+                for i in historico if i.get("tipo") == "foto" and i.get("data")}
+    por_dia = {}
+    for d, _h in ocupados:
+        por_dia[d] = por_dia.get(d, 0) + 1
+    data = datetime.date.today()
+    while True:
+        ds = data.isoformat()
+        if por_dia.get(ds, 0) < FOTOS_MAX_DIA:
+            for h in FOTOS_HORAS:
+                dt = datetime.datetime.combine(data, datetime.time(h, 0))
+                if dt > agora and (ds, dt.strftime("%H:%M")) not in ocupados:
+                    return dt
+        data += datetime.timedelta(days=1)
+
+
 def proximo_slot_disponivel(historico):
     """Retorna o próximo datetime livre para agendamento (data + hora).
     Usa o historico para saber quais slots já estão ocupados, sem fila intermediária."""
@@ -151,15 +211,29 @@ def upload_via_publer(caminho_video: str, titulo: str,
         "Publer-Workspace-Id": PUBLER_WORKSPACE_ID,
     }
 
-    # 1) Upload do arquivo de mídia
+    # 1) Upload do arquivo de mídia (retry p/ blips de rede: ConnectionReset, timeout)
     log("  Publer: enviando vídeo...")
-    with open(caminho_video, "rb") as f:
-        resp = requests.post(
-            f"{PUBLER_BASE_URL}/media",
-            headers=headers_base,
-            files={"file": (os.path.basename(caminho_video), f, "video/mp4")},
-            data={"direct_upload": "true"},
-        )
+    resp = None
+    ultimo_erro = None
+    for tentativa in range(1, 4):
+        try:
+            with open(caminho_video, "rb") as f:
+                resp = requests.post(
+                    f"{PUBLER_BASE_URL}/media",
+                    headers=headers_base,
+                    files={"file": (os.path.basename(caminho_video), f, "video/mp4")},
+                    data={"direct_upload": "true"},
+                    timeout=180,
+                )
+            break
+        except requests.exceptions.RequestException as e:
+            ultimo_erro = e
+            if tentativa < 3:
+                espera = 15 * tentativa
+                log(f"  Publer: falha de rede no upload (tentativa {tentativa}/3): {e}. Aguardando {espera}s...")
+                time.sleep(espera)
+    if resp is None:
+        raise Exception(f"Publer media upload falhou após 3 tentativas: {ultimo_erro}")
     if resp.status_code != 200:
         raise Exception(f"Publer media upload erro {resp.status_code}: {resp.text[:300]}")
     media_id = resp.json().get("id")
@@ -203,11 +277,25 @@ def upload_via_publer(caminho_video: str, titulo: str,
         }
     }
 
-    resp2 = requests.post(
-        f"{PUBLER_BASE_URL}/posts/schedule",
-        headers={**headers_base, "Content-Type": "application/json"},
-        json=body,
-    )
+    resp2 = None
+    ultimo_erro = None
+    for tentativa in range(1, 4):
+        try:
+            resp2 = requests.post(
+                f"{PUBLER_BASE_URL}/posts/schedule",
+                headers={**headers_base, "Content-Type": "application/json"},
+                json=body,
+                timeout=60,
+            )
+            break
+        except requests.exceptions.RequestException as e:
+            ultimo_erro = e
+            if tentativa < 3:
+                espera = 15 * tentativa
+                log(f"  Publer: falha de rede ao agendar (tentativa {tentativa}/3): {e}. Aguardando {espera}s...")
+                time.sleep(espera)
+    if resp2 is None:
+        raise Exception(f"Publer schedule falhou após 3 tentativas: {ultimo_erro}")
     if resp2.status_code not in (200, 201):
         raise Exception(f"Publer schedule erro {resp2.status_code}: {resp2.text[:300]}")
 
@@ -576,12 +664,14 @@ MODELOS_CATALOGO = {
     "wolf 700":      ("Wolf 700 Mud",    f"{SITE_BASE}/catalogo/quadriciclos/wolf-700-mud"),
     "wolf 1000":     ("Wolf 1000",       f"{SITE_BASE}/catalogo/quadriciclos/wolf-1000"),
     "wolf 550":      ("Wolf 550",        f"{SITE_BASE}/catalogo/quadriciclos/wolf-550"),
-    "farmer":        ("Farmer 300",      f"{SITE_BASE}/catalogo/quadriciclos/farmer-300"),
-    "dakar":         ("Dakar 300",       f"{SITE_BASE}/catalogo/quadriciclos/dakar-300"),
-    "fox":           ("Fox 325",         f"{SITE_BASE}/catalogo/quadriciclos/fox-325"),
-    "bronco":        ("Bronco 200",      f"{SITE_BASE}/catalogo/buggys/bronco-200"),
-    "macan":         ("Macan 200",       f"{SITE_BASE}/catalogo/buggys/macan-200"),
-    "shark":         ("Shark 1200",      f"{SITE_BASE}/catalogo/buggys/shark-1200"),
+    # Nomes COMPLETOS (nome + número): chave solta linkava modelo errado
+    # (ex.: legenda "Fox 250" casava com "fox" → página do Fox 325)
+    "farmer 300":    ("Farmer 300",      f"{SITE_BASE}/catalogo/quadriciclos/farmer-300"),
+    "dakar 300":     ("Dakar 300",       f"{SITE_BASE}/catalogo/quadriciclos/dakar-300"),
+    "fox 325":       ("Fox 325",         f"{SITE_BASE}/catalogo/quadriciclos/fox-325"),
+    "bronco 200":    ("Bronco 200",      f"{SITE_BASE}/catalogo/buggys/bronco-200"),
+    "macan 200":     ("Macan 200",       f"{SITE_BASE}/catalogo/buggys/macan-200"),
+    "shark 1200":    ("Shark 1200",      f"{SITE_BASE}/catalogo/buggys/shark-1200"),
     "pro racing 110": ("Pro Racing 110", f"{SITE_BASE}/catalogo/mini-motos/pro-racing-110"),
     "pro racing 125": ("Pro Racing 125", f"{SITE_BASE}/catalogo/mini-motos/pro-racing-125"),
 }
@@ -623,68 +713,87 @@ _FALLBACK_TITLES = [
 ]
 
 
+def _limpar_legenda(texto: str) -> str:
+    """Remove hashtags, menções e linhas decorativas ('- - - -') da legenda,
+    preservando o texto original."""
+    linhas = []
+    for ln in (texto or "").splitlines():
+        ln = re.sub(r"#\S+", "", ln)          # hashtags
+        ln = re.sub(r"@[\w.]+", "", ln)       # menções
+        ln = ln.strip()
+        if not ln or re.fullmatch(r"[-–—•.\s]+", ln):
+            continue                           # linha só de traços/pontos
+        linhas.append(ln)
+    return "\n".join(linhas).strip()
+
+
 def gerar_titulo_com_ia(legenda: str, shortcode: str = "") -> str:
-    modelo = detectar_modelo(legenda)
-    modelo_info = f'O vídeo é sobre o modelo "{modelo[0]}".' if modelo else ""
-    try:
-        cliente = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        prompt = f"""Você é especialista em SEO para YouTube Shorts de uma loja de mini veículos e quadriciclos chamada Chicar Mini Veículos, em BH.
-
-Crie UM título para YouTube Shorts com base na legenda abaixo.
-
-O título deve ser A PERGUNTA QUE AS PESSOAS PESQUISAM NO GOOGLE sobre esse veículo — o Google AI cita vídeos cujo título bate com a busca.
-
-Exemplos do formato desejado:
-- "Quanto custa o quadriciclo Wolf 700? Vale a pena em 2026?"
-- "Qual o melhor buggy para trilha? Veja o Shark 1200"
-- "Quadriciclo Farmer 300 é bom? Análise rápida"
-
-Regras:
-- Máximo 90 caracteres
-- Formato de pergunta de busca real (quanto custa, vale a pena, qual o melhor, é bom, onde comprar)
-- {modelo_info or "Se a legenda citar o modelo do veículo, use o nome exato no título."}
-- Pode usar o nome/número do modelo (ex.: Wolf 700), mas NUNCA invente preço em reais
-- Sem emoji, sem aspas
-
-Legenda: {legenda[:500] if legenda else "Mini veículo seminovo disponível na Chicar"}
-
-Responda APENAS com o título."""
-        resp = cliente.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=100,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return resp.content[0].text.strip().strip('"').strip("'")[:100]
-    except Exception as e:
-        import random
-        log(f"  Aviso: IA indisponível ({e}). Usando título alternativo.")
-        return random.choice(_FALLBACK_TITLES)
+    """Título do YouTube = primeira frase da LEGENDA ORIGINAL do Instagram
+    (fonte da verdade — nada de inventar conteúdo que não está no vídeo)."""
+    limpo = _limpar_legenda(legenda)
+    if limpo:
+        primeira = limpo.splitlines()[0].strip()
+        # se a primeira linha for muito curta, agrega a próxima
+        if len(primeira) < 20 and len(limpo.splitlines()) > 1:
+            primeira = (primeira + " — " + limpo.splitlines()[1].strip()).strip(" —")
+        if len(primeira) >= 12:
+            return primeira[:97] + ("..." if len(primeira) > 97 else "")
+    import random
+    return random.choice(_FALLBACK_TITLES)
 
 
 def gerar_descricao(legenda: str = "", shortcode: str = "") -> str:
-    """Descrição com link da página do modelo (quando detectado) + artigo do blog.
-    Links específicos > link da home: o Google AI usa esses links como fonte."""
-    modelo = detectar_modelo(legenda)
-
-    if modelo:
-        nome, url = modelo
-        linha_modelo = f"{nome} disponível na Chicar Mini Veículos em BH.\n"
-        linha_link = f"Preço atualizado e ficha técnica completa:\n👉 {url}\n\n"
-    else:
-        linha_modelo = "Mini veículos e quadriciclos novos e seminovos na Chicar, em BH.\n"
-        linha_link = f"Catálogo completo com preços e fichas técnicas:\n👉 {SITE_BASE}/catalogo\n\n"
-
-    # Rotaciona o artigo do blog de forma determinística por vídeo
-    blog_titulo, blog_url = BLOG_LINKS[sum(ord(c) for c in (shortcode or "x")) % len(BLOG_LINKS)]
+    """Descrição = LEGENDA ORIGINAL do Instagram (fonte da verdade) + contatos +
+    hashtags. Link de modelo específico foi removido: o detector por palavra-chave
+    linkava modelo errado (ex.: legenda 'Fox 250' → página do Fox 325)."""
+    corpo = _limpar_legenda(legenda)
+    if not corpo:
+        corpo = "Mini veículos e quadriciclos novos e seminovos na Chicar, em BH."
 
     return (
-        linha_modelo
-        + linha_link
-        + f"{blog_titulo}:\n👉 {blog_url}\n\n"
+        corpo + "\n\n"
+        + f"Catálogo completo com preços e fichas técnicas:\n👉 {SITE_BASE}/catalogo\n\n"
         + f"📲 Instagram: https://instagram.com/{INSTAGRAM_PERFIL}\n"
         + f"💬 WhatsApp: https://api.whatsapp.com/send?phone=5531993875483\n\n"
         + "#chicarminiveiculos #miniveiculo #quadriciclo #seminovos #shorts"
     )
+
+# Hashtags fixas do TikTok do chicar: nicho + localização (BH) + distribuição + marca
+_HASHTAGS_TIKTOK_CHICAR = (
+    "#quadriciclo #buggy #trilha #4x4 #offroad #miniveiculo "
+    "#bh #belohorizonte #minasgerais "
+    "#fyp #parati #viral #chicarminiveiculos"
+)
+
+
+def _hashtag_modelo(nome: str) -> str:
+    """'Wolf 700 Mud' -> '#wolf700' (junta as 2 primeiras palavras)."""
+    import re
+    partes = nome.lower().split()
+    slug = re.sub(r"[^a-z0-9]", "", "".join(partes[:2]))
+    return f"#{slug}" if slug else ""
+
+
+def gerar_legenda_tiktok_chicar(legenda: str = "", shortcode: str = "") -> str:
+    """Legenda do TikTok = LEGENDA ORIGINAL do Instagram (fonte da verdade) +
+    CTA + hashtags. O texto de quem postou descreve o que realmente aparece
+    no vídeo — nada de gancho inventado por IA que descola do conteúdo."""
+    corpo = _limpar_legenda(legenda)
+    if not corpo:
+        corpo = "Mini veículos e quadriciclos na Chicar 🔥"
+    # TikTok: limite 2200; reserva espaço p/ CTA + hashtags
+    corpo = corpo[:1800]
+
+    tags = _HASHTAGS_TIKTOK_CHICAR
+    modelo = detectar_modelo(legenda)
+    if modelo:
+        htag = _hashtag_modelo(modelo[0])
+        if htag and htag not in tags:
+            tags = f"{htag} {tags}"
+
+    cta = "📲 Chama no WhatsApp: (31) 99387-5483\n📍 Belo Horizonte/MG"
+    return f"{corpo}\n\n{cta}\n\n{tags}"
+
 
 def calcular_horarios(n: int, offset: int = 0):
     """Retorna n horários a partir do slot 'offset', dentro dos MAX_POR_DIA slots fixos do dia.
@@ -709,6 +818,39 @@ def calcular_horarios(n: int, offset: int = 0):
 
 ARQUIVO_SESSAO_IG = "sessao_instagram"
 
+
+def sincronizar_cookies_navegador(L):
+    """Puxa cookies frescos do Instagram de um navegador logado e injeta na sessão
+    do instaloader. Tenta Firefox > Chrome > Edge (Firefox é o mais confiável: lê o
+    banco direto, sem App-Bound Encryption nem admin). Mantém a sessão viva sem
+    precisar de login por senha — que sempre cai em checkpoint.
+    Retorna True se conseguiu um sessionid válido."""
+    try:
+        import browser_cookie3 as bc
+    except Exception:
+        return False
+
+    fontes = [("Firefox", bc.firefox), ("Chrome", bc.chrome), ("Edge", bc.edge)]
+    for nome, fn in fontes:
+        try:
+            cookies = {c.name: c.value for c in fn(domain_name="instagram.com")}
+        except Exception:
+            continue  # navegador ausente, fechado ou cookies criptografados (Chrome 127+)
+        if cookies.get("sessionid") and cookies.get("ds_user_id"):
+            jar = L.context._session.cookies
+            jar.clear()
+            for nome_c, val in cookies.items():
+                jar.set(nome_c, val, domain=".instagram.com")
+            L.context.username = INSTAGRAM_LOGIN
+            try:
+                L.save_session_to_file(ARQUIVO_SESSAO_IG)
+            except Exception:
+                pass
+            log(f"Cookies do Instagram sincronizados do {nome}.")
+            return True
+    return False
+
+
 def login_instagram():
     L = instaloader.Instaloader(
         download_videos=True, download_video_thumbnails=False,
@@ -718,10 +860,20 @@ def login_instagram():
     )
     sessao_valida = False
     sessao_carregada = False
+
+    # 1) Carrega a sessão salva como baseline
     try:
         L.load_session_from_file(INSTAGRAM_LOGIN, ARQUIVO_SESSAO_IG)
         sessao_carregada = True
-        # Valida com o endpoint de feed
+    except Exception:
+        log("Sessão Instagram salva não encontrada.")
+
+    # 2) Refresca com cookies de um navegador logado (mantém a sessão viva sozinho)
+    if sincronizar_cookies_navegador(L):
+        sessao_carregada = True
+
+    # 3) Valida a sessão atual no endpoint de feed
+    try:
         r = L.context._session.get(
             "https://i.instagram.com/api/v1/feed/user/33469782306/",
             params={"count": 1},
@@ -729,12 +881,13 @@ def login_instagram():
         )
         if r.status_code == 200:
             sessao_valida = True
-            log("Sessão Instagram carregada e validada.")
+            log("Sessão Instagram validada.")
         else:
-            log(f"Sessão Instagram expirada (status {r.status_code}). Tentando re-login...")
-    except Exception:
-        log("Sessão Instagram não encontrada. Tentando login...")
+            log(f"Sessão Instagram expirada (status {r.status_code}).")
+    except Exception as e:
+        log(f"Falha ao validar sessão Instagram: {e}")
 
+    # 4) Último recurso: login por senha (normalmente cai em checkpoint)
     if not sessao_valida:
         ultimo_erro = None
         for tentativa in range(1, 4):  # 3 tentativas
@@ -746,10 +899,8 @@ def login_instagram():
                 sessao_valida = True
                 break
             except SystemExit:
-                raise Exception(
-                    "Instagram bloqueou o login (checkpoint / 2FA). "
-                    "Execute login_instagram.py manualmente e tente novamente."
-                )
+                ultimo_erro = "checkpoint / 2FA"
+                break
             except Exception as e:
                 ultimo_erro = e
                 espera = tentativa * 30
@@ -761,7 +912,10 @@ def login_instagram():
                 # Sessão carregada mas re-login falhou — tenta usar a sessão existente mesmo assim
                 log(f"  Re-login falhou ({ultimo_erro}). Tentando continuar com sessão existente...")
             else:
-                raise Exception(f"Login Instagram: {ultimo_erro}")
+                raise Exception(
+                    f"Instagram sem sessão válida ({ultimo_erro}). "
+                    "Logue no @chicarminiveiculos no Firefox (ou rode renovar_sessao_instagram.py)."
+                )
 
     # Usa a sessão interna do instaloader (já tem todos os cookies corretos)
     session = L.context._session
@@ -852,6 +1006,310 @@ def buscar_perfil_e_reels(session, ja_conhecidos):
 
     return user_id, novos
 
+def _carregar_token_instagram():
+    _base = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(_base, ARQUIVO_TOKEN_IG), encoding="utf-8") as f:
+        cfg = json.load(f)
+    return cfg["access_token"], cfg["ig_user_id"]
+
+
+_FB_CACHE = {"page_id": None, "page_token": None, "videos": None}
+
+
+def _normaliza_legenda(texto):
+    """Normaliza legenda para casar o mesmo vídeo entre Instagram e Facebook."""
+    t = re.sub(r"[#@]\S+", " ", texto or "")
+    t = re.sub(r"[^0-9a-zA-ZáéíóúâêôãõçÁÉÍÓÚÂÊÔÃÕÇ ]", " ", t)
+    return re.sub(r"\s+", " ", t).strip().lower()
+
+
+def _facebook_page():
+    """Retorna (page_id, page_token) da Página ligada à conta. Cacheado."""
+    if _FB_CACHE["page_token"]:
+        return _FB_CACHE["page_id"], _FB_CACHE["page_token"]
+    token, _ = _carregar_token_instagram()
+    r = requests.get(f"https://graph.facebook.com/{GRAPH_API_VER}/me/accounts",
+                     params={"access_token": token, "fields": "id,access_token"}, timeout=30)
+    dados = r.json().get("data", [])
+    if not dados:
+        raise Exception("Nenhuma Página do Facebook acessível pelo token.")
+    _FB_CACHE["page_id"] = dados[0]["id"]
+    _FB_CACHE["page_token"] = dados[0]["access_token"]
+    return _FB_CACHE["page_id"], _FB_CACHE["page_token"]
+
+
+def buscar_video_no_facebook(legenda):
+    """Reels com música licenciada não expõem media_url na API do Instagram, mas a
+    MESMA mídia está publicada na Página do Facebook.
+    Devolve {'fb_url': permalink do reel, 'source': MP4 direto} ou None.
+
+    IMPORTANTE: o campo 'source' entrega um stream de VÍDEO SEM ÁUDIO e em
+    resolução menor (720p). Preferir sempre 'fb_url' com yt-dlp mesclando
+    vídeo+áudio (chega a 1080p com som). 'source' fica só como último recurso."""
+    try:
+        page_id, page_token = _facebook_page()
+    except Exception as e:
+        log(f"  Facebook indisponível ({e}).")
+        return None
+
+    if _FB_CACHE["videos"] is None:
+        videos = []
+        for edge in ("videos", "video_reels"):
+            try:
+                r = requests.get(f"https://graph.facebook.com/{GRAPH_API_VER}/{page_id}/{edge}",
+                                 params={"access_token": page_token,
+                                         "fields": "id,description,title,source,created_time",
+                                         "limit": 50}, timeout=30)
+                videos += r.json().get("data", [])
+            except Exception:
+                pass
+        _FB_CACHE["videos"] = videos
+
+    alvo = _normaliza_legenda(legenda)
+    if len(alvo) < 12:
+        return None
+    for v in _FB_CACHE["videos"]:
+        cand = _normaliza_legenda(v.get("description") or v.get("title") or "")
+        if not cand:
+            continue
+        # casa pelo início da legenda (o texto é o mesmo nas duas redes)
+        n = min(len(alvo), len(cand), 40)
+        if n >= 12 and alvo[:n] == cand[:n]:
+            fbid = v.get("id")
+            return {
+                "fb_url": f"https://www.facebook.com/reel/{fbid}/" if fbid else None,
+                "source": v.get("source"),
+            }
+    return None
+
+
+def _shortcode_de_permalink(permalink):
+    """Extrai o shortcode de uma permalink do Instagram (.../reel/CODE/ ou .../p/CODE/)."""
+    m = re.search(r"/(?:reel|reels|p|tv)/([^/]+)/", permalink or "")
+    return m.group(1) if m else ""
+
+
+def buscar_reels_graph_api(ja_conhecidos):
+    """Lê os reels da conta pela Instagram Graph API oficial usando o token permanente.
+    Sem cookies, sem login, sem navegador. Retorna (ig_user_id, lista_de_novos).
+    Cada novo inclui 'media_url' (link direto do .mp4) para download sem autenticação."""
+    DATA_MINIMA = datetime.datetime(2026, 4, 26)
+    token, igid = _carregar_token_instagram()
+    base = f"https://graph.facebook.com/{GRAPH_API_VER}"
+    campos = "id,caption,media_type,media_product_type,media_url,permalink,timestamp"
+
+    novos = []
+    url = f"{base}/{igid}/media"
+    params = {"fields": campos, "limit": 25, "access_token": token}
+
+    paginas = 0
+    while url and paginas < 4:  # varre até ~100 itens mais recentes
+        for tentativa in range(1, 4):
+            r = requests.get(url, params=params, timeout=30)
+            if r.status_code == 200:
+                break
+            espera = 30 * tentativa
+            log(f"  Graph API status {r.status_code} (tentativa {tentativa}/3). Aguardando {espera}s...")
+            time.sleep(espera)
+        else:
+            raise Exception(f"Graph API falhou: {r.status_code} {r.text[:200]}")
+
+        data = r.json()
+        parar = False
+        for m in data.get("data", []):
+            ts = m.get("timestamp", "")
+            try:
+                taken = datetime.datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                taken = datetime.datetime.now()
+            if taken < DATA_MINIMA:
+                parar = True  # itens vêm do mais novo ao mais antigo
+                break
+            if m.get("media_type") != "VIDEO":
+                continue
+            media_url = m.get("media_url")
+            shortcode = _shortcode_de_permalink(m.get("permalink"))
+            if not shortcode or shortcode in ja_conhecidos:
+                continue
+            fb_url = None
+            if not media_url:
+                # Reel com música licenciada: a API do Instagram omite o media_url.
+                # A mesma mídia está na Página do Facebook — baixamos de lá COM áudio.
+                fb = buscar_video_no_facebook(m.get("caption", ""))
+                if fb:
+                    fb_url = fb.get("fb_url")
+                    media_url = fb.get("source")  # só como último recurso (mudo/720p)
+                    log(f"  [{shortcode}] media_url bloqueado (música) → baixando via Facebook.")
+                else:
+                    log(f"  [{shortcode}] media_url bloqueado e sem equivalente no Facebook → tentando yt-dlp.")
+            novos.append({
+                "shortcode": shortcode,
+                "video_url": media_url or f"https://www.instagram.com/reel/{shortcode}/",
+                "media_url": media_url,
+                "fb_url":    fb_url,
+                "legenda":   m.get("caption", "") or "",
+                "taken_at":  int(taken.timestamp()),
+            })
+
+        if parar:
+            break
+        url = data.get("paging", {}).get("next")
+        params = None  # a URL 'next' já carrega todos os parâmetros
+        paginas += 1
+
+    return igid, novos
+
+
+def buscar_fotos_graph_api(ja_conhecidos, dias=30):
+    """Busca fotos e carrosséis (IMAGE / CAROUSEL_ALBUM) dos últimos `dias` dias.
+    Retorna lista de {shortcode, imagens:[urls], legenda, taken_at}.
+    Carrosséis: só os filhos de imagem (vídeo em carrossel é ignorado aqui)."""
+    token, igid = _carregar_token_instagram()
+    base = f"https://graph.facebook.com/{GRAPH_API_VER}"
+    data_minima = datetime.datetime.now() - datetime.timedelta(days=dias)
+    campos = ("id,caption,media_type,media_url,permalink,timestamp,"
+              "children{media_type,media_url}")
+
+    novos = []
+    url = f"{base}/{igid}/media"
+    params = {"fields": campos, "limit": 25, "access_token": token}
+    paginas = 0
+    while url and paginas < 6:
+        for tentativa in range(1, 4):
+            r = requests.get(url, params=params, timeout=30)
+            if r.status_code == 200:
+                break
+            time.sleep(30 * tentativa)
+        else:
+            raise Exception(f"Graph API fotos falhou: {r.status_code} {r.text[:200]}")
+
+        data = r.json()
+        parar = False
+        for m in data.get("data", []):
+            try:
+                taken = datetime.datetime.strptime(m.get("timestamp", "")[:19], "%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                continue
+            if taken < data_minima:
+                parar = True
+                break
+            tipo = m.get("media_type")
+            if tipo not in ("IMAGE", "CAROUSEL_ALBUM"):
+                continue
+            shortcode = _shortcode_de_permalink(m.get("permalink"))
+            if not shortcode or shortcode in ja_conhecidos:
+                continue
+            if tipo == "IMAGE":
+                imagens = [m["media_url"]] if m.get("media_url") else []
+            else:
+                imagens = [c["media_url"] for c in m.get("children", {}).get("data", [])
+                           if c.get("media_type") == "IMAGE" and c.get("media_url")]
+            imagens = imagens[:10]  # limite multiphoto do Publer/TikTok
+            if not imagens:
+                continue
+            novos.append({
+                "shortcode": shortcode,
+                "imagens":   imagens,
+                "legenda":   m.get("caption", "") or "",
+                "taken_at":  int(taken.timestamp()),
+            })
+        if parar:
+            break
+        url = data.get("paging", {}).get("next")
+        params = None
+        paginas += 1
+
+    novos.reverse()  # mais antigos primeiro (ordem cronológica de postagem)
+    return novos
+
+
+def baixar_imagens(shortcode, urls):
+    """Baixa as imagens de um post/carrossel. Retorna lista de caminhos locais."""
+    os.makedirs(PASTA_DOWNLOAD, exist_ok=True)
+    caminhos = []
+    for i, u in enumerate(urls):
+        caminho = os.path.join(PASTA_DOWNLOAD, f"{shortcode}_{i}.jpg")
+        for tentativa in range(1, 4):
+            try:
+                r = requests.get(u, timeout=60)
+                r.raise_for_status()
+                with open(caminho, "wb") as fh:
+                    fh.write(r.content)
+                caminhos.append(caminho)
+                break
+            except Exception as e:
+                if tentativa < 3:
+                    time.sleep(10 * tentativa)
+                else:
+                    log(f"  Imagem {i} falhou ({e}) — seguindo sem ela.")
+    return caminhos
+
+
+def upload_fotos_via_publer(caminhos, texto, horario=None):
+    """Posta foto única ou carrossel (Photo Mode) no TikTok via Publer."""
+    headers_base = {
+        "Authorization": f"Bearer-API {PUBLER_API_KEY}",
+        "Publer-Workspace-Id": PUBLER_WORKSPACE_ID,
+    }
+    media_ids = []
+    for caminho in caminhos:
+        resp = None
+        ultimo_erro = None
+        for tentativa in range(1, 4):
+            try:
+                with open(caminho, "rb") as f:
+                    resp = requests.post(
+                        f"{PUBLER_BASE_URL}/media", headers=headers_base,
+                        files={"file": (os.path.basename(caminho), f, "image/jpeg")},
+                        data={"direct_upload": "true"}, timeout=120,
+                    )
+                break
+            except requests.exceptions.RequestException as e:
+                ultimo_erro = e
+                if tentativa < 3:
+                    time.sleep(15 * tentativa)
+        if resp is None or resp.status_code != 200 or not resp.json().get("id"):
+            raise Exception(f"Publer upload de imagem falhou: {ultimo_erro or resp.text[:200]}")
+        media_ids.append({"id": resp.json()["id"]})
+    log(f"  Publer: {len(media_ids)} imagem(ns) enviada(s)")
+
+    agora = datetime.datetime.now()
+    if horario and horario < agora:
+        horario = horario + datetime.timedelta(days=1)
+    scheduled_at = (horario + datetime.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%S.000Z") if horario else None
+
+    account_entry = {"id": PUBLER_TIKTOK_ID}
+    if scheduled_at:
+        account_entry["scheduled_at"] = scheduled_at
+    body = {"bulk": {"state": "scheduled" if scheduled_at else "published", "posts": [{
+        "networks": {"tiktok": {
+            "type": "photo", "text": texto[:2200], "media": media_ids,
+            "details": {"privacy_level": "PUBLIC_TO_EVERYONE", "disable_comment": False},
+        }},
+        "accounts": [account_entry],
+    }]}}
+
+    resp2 = None
+    ultimo_erro = None
+    for tentativa in range(1, 4):
+        try:
+            resp2 = requests.post(f"{PUBLER_BASE_URL}/posts/schedule",
+                                  headers={**headers_base, "Content-Type": "application/json"},
+                                  json=body, timeout=60)
+            break
+        except requests.exceptions.RequestException as e:
+            ultimo_erro = e
+            if tentativa < 3:
+                time.sleep(15 * tentativa)
+    if resp2 is None:
+        raise Exception(f"Publer schedule foto falhou: {ultimo_erro}")
+    if resp2.status_code not in (200, 201):
+        raise Exception(f"Publer schedule foto erro {resp2.status_code}: {resp2.text[:300]}")
+    job_id = resp2.json().get("job_id", "desconhecido")
+    log(f"  Publer foto agendada para {horario.strftime('%d/%m/%Y %H:%M') if horario else 'agora'} | job_id: {job_id}")
+    return job_id
+
+
 def buscar_reels_novos_ytdlp(ja_conhecidos):
     """Lista novos reels via yt-dlp.
     Usa instagram_cookies.txt se disponível (necessário no GitHub Actions),
@@ -911,11 +1369,106 @@ def buscar_reels_novos_ytdlp(ja_conhecidos):
     return user_id, novos
 
 
-def baixar_video_instagram(shortcode, tentativas=3):
-    """Baixa reel do Instagram via yt-dlp com retry automático em caso de rate-limit."""
+_FFMPEG_DIR = None
+
+
+def _ffmpeg_dir():
+    """Diretório contendo 'ffmpeg' com o nome padrão, exigido pelo yt-dlp para
+    mesclar vídeo+áudio. O binário do imageio-ffmpeg tem nome versionado."""
+    global _FFMPEG_DIR
+    if _FFMPEG_DIR:
+        return _FFMPEG_DIR
+    import shutil
+    import imageio_ffmpeg
+    destino = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_ffmpeg")
+    os.makedirs(destino, exist_ok=True)
+    alvo = os.path.join(destino, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    if not os.path.exists(alvo):
+        shutil.copy(imageio_ffmpeg.get_ffmpeg_exe(), alvo)
+    _FFMPEG_DIR = destino
+    return destino
+
+
+def _tem_audio(caminho):
+    """True se o arquivo tem faixa de áudio (guarda contra upload mudo)."""
+    try:
+        import subprocess
+        import imageio_ffmpeg
+        saida = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-i", caminho],
+                               capture_output=True, text=True, errors="replace").stderr
+        return "Audio:" in saida
+    except Exception:
+        return True  # na dúvida, não bloqueia o fluxo
+
+
+def _baixar_com_ytdlp(url, shortcode, tentativas=3):
+    """Baixa mesclando melhor vídeo + melhor áudio. Retorna o caminho ou None."""
+    opts = {
+        "outtmpl": os.path.join(PASTA_DOWNLOAD, f"{shortcode}.%(ext)s"),
+        "format": "bv*+ba/b",
+        "merge_output_format": "mp4",
+        "ffmpeg_location": _ffmpeg_dir(),
+        "quiet": True,
+        "no_warnings": True,
+    }
+    for tentativa in range(1, tentativas + 1):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+            for ext in ("mp4", "mkv", "webm"):
+                p = os.path.join(PASTA_DOWNLOAD, f"{shortcode}.{ext}")
+                if os.path.exists(p) and os.path.getsize(p) > 0:
+                    return p
+        except Exception as e:
+            if tentativa < tentativas:
+                espera = 20 * tentativa
+                log(f"  yt-dlp falhou (tentativa {tentativa}/{tentativas}): {str(e)[:120]}. Aguardando {espera}s...")
+                time.sleep(espera)
+    return None
+
+
+def baixar_video_instagram(shortcode, media_url=None, tentativas=3, fb_url=None):
+    """Baixa o reel. Ordem de preferência:
+    1) fb_url (reel na Página do Facebook) via yt-dlp mesclando vídeo+áudio — usado
+       nos reels com música licenciada; entrega até 1080p COM som.
+    2) media_url da Graph API do Instagram (download direto do CDN).
+    3) yt-dlp no link público do Instagram."""
     caminho = os.path.join(PASTA_DOWNLOAD, f"{shortcode}.mp4")
     if os.path.exists(caminho):
         return caminho
+
+    # 1) Reel com música: baixa do Facebook com áudio (o 'source' da API vem mudo)
+    if fb_url:
+        p = _baixar_com_ytdlp(fb_url, shortcode, tentativas)
+        if p:
+            if not _tem_audio(p):
+                log(f"  ⚠️  {shortcode}: vídeo do Facebook veio SEM áudio.")
+            if p != caminho:
+                os.replace(p, caminho)
+            return caminho
+        log("  Facebook via yt-dlp falhou; tentando demais fontes...")
+
+    # 2) Download direto do media_url da Graph API
+    if media_url:
+        for tentativa in range(1, tentativas + 1):
+            try:
+                with requests.get(media_url, stream=True, timeout=120) as resp:
+                    resp.raise_for_status()
+                    with open(caminho, "wb") as fh:
+                        for chunk in resp.iter_content(chunk_size=1 << 20):
+                            if chunk:
+                                fh.write(chunk)
+                if os.path.getsize(caminho) > 0:
+                    return caminho
+            except Exception as e:
+                if os.path.exists(caminho):
+                    os.remove(caminho)
+                if tentativa < tentativas:
+                    espera = 15 * tentativa
+                    log(f"  Download direto falhou (tentativa {tentativa}/{tentativas}): {e}. Aguardando {espera}s...")
+                    time.sleep(espera)
+        log("  Download direto falhou; tentando yt-dlp como fallback...")
+
     url = f"https://www.instagram.com/reel/{shortcode}/"
     opts = {
         "outtmpl": os.path.join(PASTA_DOWNLOAD, f"{shortcode}.%(ext)s"),
@@ -953,7 +1506,39 @@ def baixar_video_instagram(shortcode, tentativas=3):
 #  FLUXO PRINCIPAL
 # ─────────────────────────────────────────
 
+_ARQUIVO_LOCK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agente.lock")
+
+def _adquirir_lock():
+    """Evita duas execuções simultâneas (causa posts duplicados).
+    Lock por arquivo com PID; considerado obsoleto após 2h."""
+    if os.path.exists(_ARQUIVO_LOCK):
+        idade = time.time() - os.path.getmtime(_ARQUIVO_LOCK)
+        if idade < 2 * 3600:
+            log("Outra execução em andamento (agente.lock). Abortando esta.")
+            return False
+        # lock velho — provável processo morto
+    with open(_ARQUIVO_LOCK, "w") as f:
+        f.write(str(os.getpid()))
+    return True
+
+
+def _liberar_lock():
+    try:
+        os.remove(_ARQUIVO_LOCK)
+    except Exception:
+        pass
+
+
 def main():
+    if not _adquirir_lock():
+        return
+    try:
+        _main_protegido()
+    finally:
+        _liberar_lock()
+
+
+def _main_protegido():
     log("=" * 50)
     log("AGENTE INICIADO")
     log(f"Perfil: @{INSTAGRAM_PERFIL}")
@@ -969,15 +1554,6 @@ def main():
         log("AVISO: token_youtube.pickle não encontrado — será necessário autorizar via browser.")
     log("Credenciais YouTube verificadas.")
 
-    # ── LOGIN INSTAGRAM (opcional — fallback para sessão ou acesso público) ───
-    log("Conectando ao Instagram...")
-    try:
-        ig_loader, ig_session = login_instagram()
-        log("Instagram OK.")
-    except Exception as e:
-        ig_loader, ig_session = None, None
-        log(f"  Instagram: sessão indisponível ({e}). Usando acesso público via yt-dlp.")
-
     # ── FILA LEGADA: migra itens antigos de fila_reels.json ──────────────────
     fila_legada = carregar_fila()
     ja_conhecidos = shortcodes_postados(historico) | {f["shortcode"] for f in fila_legada}
@@ -986,66 +1562,110 @@ def main():
     log("Verificando novos Reels no Instagram...")
     novos_instagram = []
     user_id = "desconhecido"
+    obtido = False
 
-    # Método 1: API privada via sessão instaloader (preferido — legenda completa)
-    if ig_session is not None:
-        try:
-            user_id, novos_instagram = buscar_perfil_e_reels(ig_session, ja_conhecidos)
-            log(f"Perfil encontrado. ID: {user_id}")
-        except Exception as e:
-            log(f"  API Instagram falhou ({e}). Tentando via yt-dlp...")
-            ig_session = None  # força fallback abaixo
+    # Método 0: Graph API oficial (preferido — token permanente, sem cookies/login)
+    try:
+        user_id, novos_instagram = buscar_reels_graph_api(ja_conhecidos)
+        log(f"Graph API OK. Conta {user_id}: {len(novos_instagram)} reel(s) novos.")
+        obtido = True
+    except Exception as e:
+        log(f"  Graph API indisponível ({e}). Tentando métodos legados (instaloader/yt-dlp)...")
 
-    # Método 2: scraping público via yt-dlp (GitHub Actions, IP bloqueado, ou fallback)
-    if ig_session is None:
+    # Fallback: login instaloader → API privada, depois yt-dlp público
+    if not obtido:
+        log("Conectando ao Instagram (fallback)...")
         try:
-            user_id, novos_instagram = buscar_reels_novos_ytdlp(ja_conhecidos)
-            log(f"  yt-dlp: {len(novos_instagram)} reel(s) novos encontrados.")
+            ig_loader, ig_session = login_instagram()
+            log("Instagram OK (sessão).")
         except Exception as e:
-            log(f"ERRO ao buscar reels: {e}")
-            return
+            ig_session = None
+            log(f"  Instagram: sessão indisponível ({e}). Usando acesso público via yt-dlp.")
+
+        if ig_session is not None:
+            try:
+                user_id, novos_instagram = buscar_perfil_e_reels(ig_session, ja_conhecidos)
+                log(f"Perfil encontrado. ID: {user_id}")
+                obtido = True
+            except Exception as e:
+                log(f"  API Instagram falhou ({e}). Tentando via yt-dlp...")
+
+        if not obtido:
+            try:
+                user_id, novos_instagram = buscar_reels_novos_ytdlp(ja_conhecidos)
+                log(f"  yt-dlp: {len(novos_instagram)} reel(s) novos encontrados.")
+            except Exception as e:
+                log(f"ERRO ao buscar reels: {e}")
+                return
 
     # Fila legada vem primeiro, novos do Instagram em seguida
     todos = fila_legada + novos_instagram
 
-    if not todos:
-        log("Nenhum Reel novo encontrado.")
+    # ── FOTOS E CARROSSÉIS (últimos 30 dias) → só TikTok (Photo Mode) ────────
+    fotos_novas = []
+    try:
+        fotos_novas = buscar_fotos_graph_api(ja_conhecidos, dias=30)
+        if fotos_novas:
+            log(f"{len(fotos_novas)} foto(s)/carrossel(éis) novos para o TikTok.")
+    except Exception as e:
+        log(f"  Busca de fotos falhou ({e}). Seguindo só com reels.")
+
+    if not todos and not fotos_novas:
+        log("Nenhum Reel ou foto novos encontrados.")
         log("AGENTE FINALIZADO\n")
+        _salvar_status_e_commitar()
         return
 
-    log(f"{len(todos)} Reel(s) para processar "
-        f"({len(fila_legada)} da fila legada + {len(novos_instagram)} novos).")
+    if todos:
+        log(f"{len(todos)} Reel(s) para processar "
+            f"({len(fila_legada)} da fila legada + {len(novos_instagram)} novos).")
 
-    # ── DOWNLOAD + UPLOAD IMEDIATO ────────────────────────────────────────────
+    # ── DOWNLOAD + UPLOAD IMEDIATO (just-in-time, mesmo dia) ──────────────────
+    slot = None
     for reel in todos:
         shortcode = reel["shortcode"]
         legenda   = reel.get("legenda", "")
-        slot      = proximo_slot_disponivel(historico)
+        slot      = proximo_slot_jit(slot)
 
         log(f"[{shortcode}] Slot: {slot.strftime('%d/%m/%Y %H:%M')}")
-        try:
-            caminho = baixar_video_instagram(shortcode)
-            time.sleep(2)
 
+        # 1) Preparação (download + textos). Se falhar aqui, pula o reel.
+        try:
+            caminho = baixar_video_instagram(shortcode, reel.get("media_url"),
+                                             fb_url=reel.get("fb_url"))
+            time.sleep(2)
             titulo    = gerar_titulo_com_ia(legenda)
             descricao = gerar_descricao(legenda, shortcode)
             log(f"  Título: {titulo}")
             modelo = detectar_modelo(legenda)
             if modelo:
                 log(f"  Modelo detectado: {modelo[0]} → link específico na descrição")
+        except Exception as e:
+            log(f"  ERRO ao preparar {shortcode}: {e}")
+            continue
 
+        # 2) YouTube e TikTok são INDEPENDENTES — a falha de um não impede o outro.
+        video_id = None
+        try:
             log(f"  Upload YouTube → {slot.strftime('%d/%m/%Y %H:%M')}...")
             video_id = upload_via_youtube_api(caminho, titulo, descricao, horario=slot)
             log(f"  ✅ YouTube OK! youtube.com/shorts/{video_id}")
+        except Exception as e_yt:
+            log(f"  ⚠️  YouTube ERRO: {e_yt}")
 
-            tiktok_id = None
-            try:
-                log(f"  Upload TikTok/Publer → {slot.strftime('%d/%m/%Y %H:%M')}...")
-                tiktok_id = upload_via_publer(caminho, titulo, horario=slot)
-                log(f"  ✅ TikTok/Publer OK! job_id: {tiktok_id}")
-            except Exception as e_tt:
-                log(f"  ⚠️  TikTok/Publer ERRO (YouTube já foi): {e_tt}")
+        tiktok_id = None
+        try:
+            log(f"  Upload TikTok/Publer → {slot.strftime('%d/%m/%Y %H:%M')}...")
+            legenda_tiktok = gerar_legenda_tiktok_chicar(legenda, shortcode)
+            log(f"  Legenda TikTok: {legenda_tiktok[:80].replace(chr(10), ' ')}")
+            tiktok_id = upload_via_publer(caminho, legenda_tiktok, horario=slot)
+            log(f"  ✅ TikTok/Publer OK! job_id: {tiktok_id}")
+        except Exception as e_tt:
+            log(f"  ⚠️  TikTok/Publer ERRO: {e_tt}")
 
+        # 3) Registra só se ALGUM canal aceitou (evita repostar no que funcionou).
+        #    Se ambos falharem, não registra → tenta de novo na próxima rodada.
+        if video_id or tiktok_id:
             historico.append({
                 "shortcode":        shortcode,
                 "data":             slot.date().isoformat(),
@@ -1054,16 +1674,53 @@ def main():
                 "tiktok_id":        tiktok_id,
             })
             salvar_historico(historico)
-
-            # Remove da fila legada se estava lá
             fila_legada = [f for f in fila_legada if f["shortcode"] != shortcode]
             salvar_fila(fila_legada)
+        else:
+            log(f"  Nenhum canal aceitou {shortcode} — será tentado de novo na próxima rodada.")
 
-            os.remove(caminho)
-            log("  Arquivo local removido.")
+        # 4) Limpa o arquivo local independentemente do resultado.
+        try:
+            if os.path.exists(caminho):
+                os.remove(caminho)
+                log("  Arquivo local removido.")
+        except Exception:
+            pass
 
+    # ── FOTOS/CARROSSÉIS → TikTok Photo Mode (mesma lógica de legenda e JIT) ──
+    for foto in fotos_novas:
+        shortcode = foto["shortcode"]
+        legenda   = foto.get("legenda", "")
+        slot_f    = proximo_slot_foto(historico)
+        log(f"[{shortcode}] FOTO ({len(foto['imagens'])} img) Slot: {slot_f.strftime('%d/%m/%Y %H:%M')}")
+
+        caminhos = []
+        try:
+            caminhos = baixar_imagens(shortcode, foto["imagens"])
+            if not caminhos:
+                log(f"  Nenhuma imagem baixada de {shortcode} — pulando.")
+                continue
+            legenda_tiktok = gerar_legenda_tiktok_chicar(legenda, shortcode)
+            log(f"  Legenda TikTok: {legenda_tiktok[:80].replace(chr(10), ' ')}")
+            tiktok_id = upload_fotos_via_publer(caminhos, legenda_tiktok, horario=slot_f)
+            log(f"  ✅ TikTok foto OK! job_id: {tiktok_id}")
+            historico.append({
+                "shortcode":        shortcode,
+                "data":             slot_f.date().isoformat(),
+                "horario_agendado": slot_f.strftime("%H:%M"),
+                "youtube_id":       None,
+                "tiktok_id":        tiktok_id,
+                "tipo":             "foto",
+            })
+            salvar_historico(historico)
         except Exception as e:
-            log(f"  ERRO em {shortcode}: {e}")
+            log(f"  ⚠️  Foto {shortcode} ERRO: {e}")
+        finally:
+            for cp in caminhos:
+                try:
+                    os.remove(cp)
+                except Exception:
+                    pass
 
     log("AGENTE FINALIZADO COM SUCESSO")
     log("=" * 50 + "\n")
@@ -1076,7 +1733,8 @@ def _salvar_status_e_commitar():
     import subprocess as sp
 
     agora = datetime.datetime.now()
-    proximo = agora.replace(hour=11, minute=59, second=0, microsecond=0) + datetime.timedelta(days=1)
+    # Roda a cada 2h dentro da janela; próxima execução estimada
+    proximo = _clamp_janela(agora + datetime.timedelta(hours=2))
 
     status = {
         "ultima_execucao": agora.isoformat(timespec="seconds"),
