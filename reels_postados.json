@@ -2960,5 +2960,45 @@
     "horario_agendado": "14:22",
     "youtube_id": "1lWRlX42Ke4",
     "tiktok_id": null
+  },
+  {
+    "shortcode": "DcpErSPR6NK",
+    "data": "2026-09-01",
+    "horario_agendado": "15:00",
+    "youtube_id": null,
+    "tiktok_id": "6a970b6d86dc546c511d33d0",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "Dcs7X77D44A",
+    "data": "2026-09-01",
+    "horario_agendado": "17:00",
+    "youtube_id": null,
+    "tiktok_id": "6a970b7386dc546c511d33e0",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "DctW10rkW4T",
+    "data": "2026-09-01",
+    "horario_agendado": "19:00",
+    "youtube_id": null,
+    "tiktok_id": "6a970b78b963569f06680511",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "Dcv7oxbkWr5",
+    "data": "2026-09-02",
+    "horario_agendado": "09:00",
+    "youtube_id": null,
+    "tiktok_id": "6a970b7c49174ef92fc214aa",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "Dcv-k8bRMfh",
+    "data": "2026-09-02",
+    "horario_agendado": "11:00",
+    "youtube_id": null,
+    "tiktok_id": "6a970b7ebf9fcee59544b6a3",
+    "tipo": "foto"
   }
 ]
