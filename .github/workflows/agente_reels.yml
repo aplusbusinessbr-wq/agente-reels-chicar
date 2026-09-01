@@ -2,10 +2,12 @@ name: Agente Reels Chicar
 
 on:
   schedule:
-    # 9h, 11h, 13h, 15h, 17h, 19h BRT (UTC-3) = 12,14,16,18,20,22 UTC
-    - cron: '0 12,14,16,18,20,22 * * *'
+    # De hora em hora, 9h–20h BRT (12–23 UTC), no minuto :17 — o GitHub descarta
+    # crons no minuto :00 em horário de pico; minuto ímpar + mais tentativas
+    # compensam slots pulados (dedup + concurrency tornam rodadas extras inócuas)
+    - cron: '17 12-23 * * *'
     # 21h BRT = 0 UTC do dia seguinte
-    - cron: '0 0 * * *'
+    - cron: '17 0 * * *'
   workflow_dispatch:          # trigger manual pelo GitHub
 
 permissions:
