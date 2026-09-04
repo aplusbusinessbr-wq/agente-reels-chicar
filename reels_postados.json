@@ -3207,5 +3207,26 @@
     "youtube_id": null,
     "tiktok_id": "6a9b1d9bcef767d4bc728a3e",
     "tipo": "foto"
+  },
+  {
+    "shortcode": "Dc4Wwt0Buj6",
+    "data": "2026-09-04",
+    "horario_agendado": "19:31",
+    "youtube_id": "IvfnzIkz4wA",
+    "tiktok_id": "6a9b445a2b921d1c584e0d54"
+  },
+  {
+    "shortcode": "Dc4P5hQhRh8",
+    "data": "2026-09-04",
+    "horario_agendado": "19:46",
+    "youtube_id": "fn6h0qD5MgU",
+    "tiktok_id": "6a9b44622b921d1c584e0d6d"
+  },
+  {
+    "shortcode": "Dc4Mga2hS46",
+    "data": "2026-09-04",
+    "horario_agendado": "20:01",
+    "youtube_id": "elgF7xXpoY0",
+    "tiktok_id": "6a9b4470bb55a338a41ac626"
   }
 ]
