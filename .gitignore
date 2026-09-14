@@ -44,3 +44,6 @@ reels_postados.backup-*.json
 # Operação Resenha Geral (separada, não roda na nuvem)
 resenha_geral_postados.json
 log_resenha_geral.txt
+
+# Helper local do gh (não subir)
+_gh_env.sh
