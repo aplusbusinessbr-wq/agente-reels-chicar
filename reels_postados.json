@@ -4481,5 +4481,19 @@
     "youtube_id": null,
     "tiktok_id": "6ac53c1b3b23063acece9682",
     "tipo": "foto"
+  },
+  {
+    "shortcode": "DeKj6w_xYvg",
+    "data": "2026-10-06",
+    "horario_agendado": "20:12",
+    "youtube_id": "ShEmapJU2nc",
+    "tiktok_id": "6ac57e28a44c140358ae9b5f"
+  },
+  {
+    "shortcode": "DeKf2AexIrK",
+    "data": "2026-10-06",
+    "horario_agendado": "20:27",
+    "youtube_id": "6rbnVMuAOxQ",
+    "tiktok_id": "6ac57e41cc11efecdd154be6"
   }
 ]
