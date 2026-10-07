@@ -35,12 +35,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y ffmpeg || echo "ffmpeg opcional — continuando sem ele"
+      # ffmpeg do sistema NÃO é necessário: o código usa o binário empacotado no
+      # imageio-ffmpeg (_ffmpeg_dir()). O 'apt-get update' já pendurou o job por
+      # 30 min (run 37670525676) quando o espelho do Ubuntu ficou mudo — removido.
 
       - name: Install Python dependencies
+        timeout-minutes: 10
         run: |
           pip install --upgrade pip
           pip install \
