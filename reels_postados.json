@@ -4723,5 +4723,29 @@
     "horario_agendado": "09:00",
     "youtube_id": "nn8SlJA3FA4",
     "tiktok_id": "6acadf7bf7b3b47246e77aa3"
+  },
+  {
+    "shortcode": "DeZSxqlRJMx",
+    "data": "2026-10-12",
+    "horario_agendado": "19:00",
+    "youtube_id": null,
+    "tiktok_id": "6acd4de598b1c7119b4b21b9",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "DeZqH68jJzW",
+    "data": "2026-10-13",
+    "horario_agendado": "09:00",
+    "youtube_id": null,
+    "tiktok_id": "6acd4de7d6018a99c3e1e7cc",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "DeZtoiSEdjn",
+    "data": "2026-10-13",
+    "horario_agendado": "11:00",
+    "youtube_id": null,
+    "tiktok_id": "6acd4dfe8c6bf22c85f370ab",
+    "tipo": "foto"
   }
 ]
