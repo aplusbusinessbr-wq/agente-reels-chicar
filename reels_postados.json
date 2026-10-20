@@ -5145,5 +5145,33 @@
     "youtube_id": null,
     "tiktok_id": "6ad69f9bd0bdfb78cd0cd209",
     "tipo": "foto"
+  },
+  {
+    "shortcode": "DeuHhUFRjpE",
+    "data": "2026-10-20",
+    "horario_agendado": "14:09",
+    "youtube_id": "WF0O-bnBwJE",
+    "tiktok_id": "6ad79e12c8662dcf80f08a4f"
+  },
+  {
+    "shortcode": "DeuEO0YxIrB",
+    "data": "2026-10-20",
+    "horario_agendado": "14:24",
+    "youtube_id": "4bfpn8Q5mNE",
+    "tiktok_id": "6ad79e22c8662dcf80f08a86"
+  },
+  {
+    "shortcode": "Det-3P_xBXF",
+    "data": "2026-10-20",
+    "horario_agendado": "14:39",
+    "youtube_id": "gHSMTWXCHUI",
+    "tiktok_id": "6ad79e2e6ff0966f59124370"
+  },
+  {
+    "shortcode": "Det4s-bx5Ps",
+    "data": "2026-10-20",
+    "horario_agendado": "14:54",
+    "youtube_id": "kH3b6v1SndE",
+    "tiktok_id": "6ad79e395fe975edb17ab452"
   }
 ]
