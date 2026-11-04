@@ -5823,5 +5823,20 @@
     "horario_agendado": "18:38",
     "youtube_id": "-4rDSHxMrsw",
     "tiktok_id": "6aea3648fae3382e7486bc12"
+  },
+  {
+    "shortcode": "DfSqF0cxwUA",
+    "data": "2026-11-04",
+    "horario_agendado": "09:00",
+    "youtube_id": "Lz9oB53FcMk",
+    "tiktok_id": "6aea7dfd50d2f40da9880c6c"
+  },
+  {
+    "shortcode": "DfSstUDRNDA",
+    "data": "2026-11-04",
+    "horario_agendado": "09:00",
+    "youtube_id": null,
+    "tiktok_id": "6aea7dff50d2f40da9880c6e",
+    "tipo": "foto"
   }
 ]
