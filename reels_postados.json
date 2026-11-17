@@ -6640,5 +6640,63 @@
     "youtube_id": null,
     "tiktok_id": "6afb7cbfa350f05574391ea4",
     "tipo": "foto"
+  },
+  {
+    "shortcode": "Df2xR6NMT-T",
+    "data": "2026-11-17",
+    "horario_agendado": "18:01",
+    "youtube_id": "YXQiY8_usgk",
+    "tiktok_id": "6afcbe5d002e98c1733365e1"
+  },
+  {
+    "shortcode": "Df2qCBNxTJb",
+    "data": "2026-11-17",
+    "horario_agendado": "18:16",
+    "youtube_id": "5pzOmchKQGs",
+    "tiktok_id": "6afcbe6dfdad239afbbeb67f"
+  },
+  {
+    "shortcode": "Df2fOAxx519",
+    "data": "2026-11-17",
+    "horario_agendado": "18:31",
+    "youtube_id": "Dccbm3NS1Sc",
+    "tiktok_id": "6afcbe79f66936a7e76cd0ce"
+  },
+  {
+    "shortcode": "Df2ExjJx9Do",
+    "data": "2026-11-17",
+    "horario_agendado": "18:46",
+    "youtube_id": "SN365qVRIWI",
+    "tiktok_id": "6afcbe84fdad239afbbeb6b9"
+  },
+  {
+    "shortcode": "Df2A7Mmx5vR",
+    "data": "2026-11-17",
+    "horario_agendado": "19:01",
+    "youtube_id": "k4eOqO_-bEQ",
+    "tiktok_id": "6afcbe90d1e5578989d6a15e"
+  },
+  {
+    "shortcode": "Df160KiRON4",
+    "data": "2026-11-17",
+    "horario_agendado": "19:16",
+    "youtube_id": "lIhGToUu_88",
+    "tiktok_id": "6afcbe9b409dc1aee7d332c3"
+  },
+  {
+    "shortcode": "Df16KfkxLtS",
+    "data": "2026-11-17",
+    "horario_agendado": "19:00",
+    "youtube_id": null,
+    "tiktok_id": "6afcbe9d002e98c17333661a",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "Df2NU7ygBGr",
+    "data": "2026-11-18",
+    "horario_agendado": "09:00",
+    "youtube_id": null,
+    "tiktok_id": "6afcbea7002e98c173336632",
+    "tipo": "foto"
   }
 ]
