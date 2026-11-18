@@ -6705,5 +6705,86 @@
     "horario_agendado": "09:00",
     "youtube_id": "lsHC2fjOmGU",
     "tiktok_id": "6afd1315a1c7faa5f8a136b2"
+  },
+  {
+    "shortcode": "Df5R7FHxbVx",
+    "data": "2026-11-18",
+    "horario_agendado": "17:37",
+    "youtube_id": "RDLIGkS0klo",
+    "tiktok_id": "6afe0a24ea8d88d5343120ce"
+  },
+  {
+    "shortcode": "Df5IHN2TVQY",
+    "data": "2026-11-18",
+    "horario_agendado": "17:52",
+    "youtube_id": "rFGjksyyCg0",
+    "tiktok_id": "6afe0a2fa1c7faa5f8a3cb3f"
+  },
+  {
+    "shortcode": "Df5EiX5zwJV",
+    "data": "2026-11-18",
+    "horario_agendado": "18:07",
+    "youtube_id": "SHSqCfZIsXk",
+    "tiktok_id": "6afe0a3c5a7a27fe7c725952"
+  },
+  {
+    "shortcode": "Df4syUtRY_q",
+    "data": "2026-11-18",
+    "horario_agendado": "18:22",
+    "youtube_id": "MdYrsOsjeXs",
+    "tiktok_id": "6afe0a495a7a27fe7c72596f"
+  },
+  {
+    "shortcode": "Df4otl_x1Xq",
+    "data": "2026-11-18",
+    "horario_agendado": "18:37",
+    "youtube_id": "ILpe-f3SnaI",
+    "tiktok_id": "6afe0a536c4ce33b102059aa"
+  },
+  {
+    "shortcode": "Df4jwICxvUq",
+    "data": "2026-11-18",
+    "horario_agendado": "18:52",
+    "youtube_id": "1O6lD5ojFBA",
+    "tiktok_id": "6afe0a5ebd1f0445acfea869"
+  },
+  {
+    "shortcode": "Df4f-UQxqbH",
+    "data": "2026-11-18",
+    "horario_agendado": "19:07",
+    "youtube_id": "zHupULjkWXU",
+    "tiktok_id": "6afe0a6863fa6942b83d6dac"
+  },
+  {
+    "shortcode": "Df4Mn6bR9wN",
+    "data": "2026-11-18",
+    "horario_agendado": "19:00",
+    "youtube_id": null,
+    "tiktok_id": "6afe0a6ac1a6f69ebd7a7dba",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "Df4xz7GDOtU",
+    "data": "2026-11-19",
+    "horario_agendado": "09:00",
+    "youtube_id": null,
+    "tiktok_id": "6afe0a6e09340c3380464734",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "Df4yzxhIIFy",
+    "data": "2026-11-19",
+    "horario_agendado": "11:00",
+    "youtube_id": null,
+    "tiktok_id": "6afe0a79bd1f0445acfea8c0",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "Df46PuMxYQO",
+    "data": "2026-11-19",
+    "horario_agendado": "13:00",
+    "youtube_id": null,
+    "tiktok_id": "6afe0a7c6391ec9a8f7777be",
+    "tipo": "foto"
   }
 ]
