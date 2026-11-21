@@ -6868,5 +6868,42 @@
     "youtube_id": null,
     "tiktok_id": "6b00a8a5f546c2bfb83c1b59",
     "tipo": "foto"
+  },
+  {
+    "shortcode": "DgAcxH6hFm0",
+    "data": "2026-11-21",
+    "horario_agendado": "16:19",
+    "youtube_id": "sPpImiqQZuw",
+    "tiktok_id": "6b01ec89beec9494dedcd6aa"
+  },
+  {
+    "shortcode": "DgAUHmpB4rU",
+    "data": "2026-11-21",
+    "horario_agendado": "16:34",
+    "youtube_id": "_GWTlcdm820",
+    "tiktok_id": "6b01ec93beec9494dedcd6d4"
+  },
+  {
+    "shortcode": "DgAQKmWxv7Z",
+    "data": "2026-11-21",
+    "horario_agendado": "16:49",
+    "youtube_id": "P9tOv6ravnA",
+    "tiktok_id": "6b01ec9f8e0df73c51ce6d7a"
+  },
+  {
+    "shortcode": "DgAgLt7jJ_5",
+    "data": "2026-11-21",
+    "horario_agendado": "17:00",
+    "youtube_id": null,
+    "tiktok_id": "6b01eca3e5e2e6dc81433a06",
+    "tipo": "foto"
+  },
+  {
+    "shortcode": "DgAhUwdIDSH",
+    "data": "2026-11-21",
+    "horario_agendado": "19:00",
+    "youtube_id": null,
+    "tiktok_id": "6b01ecac6968d0841afa3df6",
+    "tipo": "foto"
   }
 ]
